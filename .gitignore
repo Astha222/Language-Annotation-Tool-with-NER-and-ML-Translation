@@ -2,5 +2,8 @@ node_modules/
 __pycache__/
 *.pyc
 venv/
+.venv/
 .env
 .expo/
+*.db
+*.sqlite

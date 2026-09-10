@@ -4,4 +4,6 @@ sqlalchemy
 pydantic
 transformers
 torch
-
+psycopg2-binary
+pymongo
+python-dotenv
