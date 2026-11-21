@@ -162,6 +162,21 @@ class TestDocuments:
         r = upload(client, auth, name, content)
         assert r.status_code == 400 and fragment in r.json()["detail"]
 
+    def test_a_locked_temporary_file_does_not_hide_the_real_error(self, client, auth, monkeypatch):
+        """On Windows a scanner can lock the just-written upload; deleting it then fails. The user must still get the real reason (was a flaky failure)."""
+        import pathlib
+        real_unlink = pathlib.Path.unlink
+
+        def locked(self, *args, **kwargs):
+            if self.name.startswith("upload_"):
+                raise PermissionError("[WinError 32] The process cannot access the file because it is being used by another process")
+            return real_unlink(self, *args, **kwargs)
+        monkeypatch.setattr(pathlib.Path, "unlink", locked)
+        r = upload(client, auth, "e.txt", b"  \n ")
+        assert r.status_code == 400 and "No text" in r.json()["detail"]
+        ok = upload(client, auth, "fine.txt", "Rahul works in Delhi.".encode())
+        assert ok.status_code == 200
+
     def test_oversized_uploads_are_refused(self, client, auth, main_module, monkeypatch):
         monkeypatch.setattr(main_module, "MAX_UPLOAD_BYTES", 1024)
         r = upload(client, auth, "big.txt", b"a" * 5000)

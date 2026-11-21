@@ -360,3 +360,65 @@ def test_translating_into_an_unsupported_language_gives_a_clear_502(main_module,
     with pytest.raises(HTTPException) as e:
         main_module.perform_translation("en", "bn", "Hello world.")
     assert e.value.status_code == 502 and "Azure" in e.value.detail
+
+
+# ── NER memory limit (NER_MAX_MODELS) ───────────────────────────────────────
+def _counting_loader(main_module, monkeypatch):
+    loads = []
+    monkeypatch.setattr(main_module, "_ner_pipelines", {})
+    monkeypatch.setattr(main_module, "_hf_ner_pipeline", lambda model: loads.append(model) or object())
+    monkeypatch.delenv("NER_ONNX_DIR", raising=False)
+    return loads
+
+
+def test_at_most_two_ner_models_stay_loaded_and_the_least_recently_used_goes(main_module, monkeypatch):
+    m = main_module
+    loads = _counting_loader(m, monkeypatch)
+    monkeypatch.setenv("NER_MAX_MODELS", "2")
+    m.get_ner_pipeline("en")
+    m.get_ner_pipeline("hi")
+    m.get_ner_pipeline("en")                       # English used again: now Hindi is the least recently used
+    m.get_ner_pipeline("fr")                       # a third model: Hindi is unloaded
+    assert list(m._ner_pipelines) == [m.NER_MODEL_EN, m.NER_MODEL_MULTI]
+    assert loads == [m.NER_MODEL_EN, m.NER_MODEL_HI, m.NER_MODEL_MULTI]
+    m.get_ner_pipeline("hi")                       # needed again: loaded again, English (least recent) goes
+    assert list(m._ner_pipelines) == [m.NER_MODEL_MULTI, m.NER_MODEL_HI] and loads[-1] == m.NER_MODEL_HI
+
+
+def test_a_loaded_model_is_reused_not_reloaded(main_module, monkeypatch):
+    m = main_module
+    loads = _counting_loader(m, monkeypatch)
+    first = m.get_ner_pipeline("mr")
+    assert m.get_ner_pipeline("hi") is first and loads == [m.NER_MODEL_HI]      # Marathi and Hindi share one model
+
+
+def test_zero_means_no_limit_and_bad_values_fall_back_to_two(main_module, monkeypatch):
+    m = main_module
+    _counting_loader(m, monkeypatch)
+    monkeypatch.setenv("NER_MAX_MODELS", "0")
+    for lang in ("en", "hi", "fr"):
+        m.get_ner_pipeline(lang)
+    assert len(m._ner_pipelines) == 3
+    monkeypatch.setenv("NER_MAX_MODELS", "lots")
+    assert m._ner_max_models() == 2
+
+
+def test_health_reports_the_limit_and_the_loaded_models_in_use_order(client, main_module, monkeypatch):
+    monkeypatch.setenv("NER_MAX_MODELS", "2")
+    body = client.get("/health/models").json()
+    assert body["ner_max_models"] == 2 and isinstance(body["ner_loaded"], list)
+
+
+def test_concurrent_requests_for_the_same_model_load_it_once(main_module, monkeypatch):
+    import threading
+    import time
+    m = main_module
+    loads = []
+    monkeypatch.setattr(m, "_ner_pipelines", {})
+    monkeypatch.setattr(m, "_hf_ner_pipeline", lambda model: (loads.append(model), time.sleep(0.2), object())[2])
+    threads = [threading.Thread(target=m.get_ner_pipeline, args=("hi",)) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert loads == [m.NER_MODEL_HI]
