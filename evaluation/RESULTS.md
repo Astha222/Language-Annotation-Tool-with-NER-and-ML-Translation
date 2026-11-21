@@ -568,6 +568,27 @@ Reading it:
 ### Item 1: GLiNER adapter, offset-less entities (2026-11-19)
 The improved matching (case-folded and whitespace-flexible search) recovered **no additional entities**: the six re-runs (Marathi and Tamil for base and small, German and French for base) have exactly the same predictions and F1 as before (difference 0.000). The 2-6 entities per run that still cannot be placed are entities whose returned text does not occur in the sentence; they are 0.14-0.93% of predictions and worth at most +0.007 F1. Closed as measured, no effect.
 
+### Language identification (2026-11-21; `evaluation/eval_language_id.py`)
+
+The app's `detect_language()` against langdetect alone, sentence by sentence, on the first 1,000 sentences of each frozen test set (all of a set if smaller). Correct = detected as the set's own language.
+
+| test set | language | sentences | langdetect alone | app (script first, then langdetect) | most frequent wrong answers (app) |
+|---|---|---|---|---|---|
+| Naamapadam / HiNER / MultiCoNER Hindi | hi | 864 / 1,000 / 514 | 96.4% / 97.7% / 98.1% | same | mr, ne |
+| Hinglish (ours) | hi | 125 | 0.0% | 97.6% | id, so |
+| Marathi | mr | 1,000 | 96.4% | 96.4% | hi (22), ne (10) |
+| Bengali | bn | 607 | 99.7% | 99.7% | |
+| **Assamese** (silver set) | as | 51 | **0.0%** | **92.2%** | bn (3: no ৰ/ৱ in the sentence) |
+| **Odia** (silver set) | or | 994 | **0.0%** (langdetect fails) | **99.9%** | |
+| Punjabi / Gujarati / Tamil / Telugu / Kannada / Malayalam | | 993 / 1,000 / 758 / 847 / 1,000 / 965 | 99.8-100% | same | |
+| English, WNUT-2017 / English-EWT | en | 1,000 / 1,000 | 89.3% / **76.4%** | same | de, tl, none |
+| German MultiCoNER / UNER PUD | de | 512 / 1,000 | 80.7% / 99.7% | same | en, nl |
+| Spanish / French MultiCoNER | es / fr | 854 / 857 | 92.9% / 91.5% | same | en, it |
+| Russian / Chinese / Japanese / Arabic | | 1,000 / 500 / 1,000 / 924 | 99.2% / 95.2% / 99.9% / 99.0% | same | bg / ko / en / fa |
+| **all** | | 19,365 | 90.2% | **96.2%** | |
+
+Reading it: the script rule fixes Odia and Assamese and changes nothing else. **Open problem:** langdetect is unreliable on short English sentences (EWT 76.4%), and on lower-case MultiCoNER text; short English typed with the language set to "auto" can be routed to the multilingual model.
+
 ## Caveats
 
 * Small samples: differences under about 0.03 F1 or 2 chrF++ points are noise.

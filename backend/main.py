@@ -21,6 +21,7 @@ import doc_extract
 import azure_translator
 import local_translator
 import hinglish
+import script_lang
 import result_cache
 import language_status
 
@@ -135,7 +136,8 @@ ner_collection = mongo_db["ner_tags"]
 # Model preloading: load and warm the models once, at startup
 # -------------------------------------------------------
 # Without this the first user request pays the whole model-loading cost (about 15 s for the English NER model).
-# PRELOAD_MODELS is a comma-separated list: ner_en, ner_multi, mt:<src>-<tgt> (e.g. mt:en-hi). "none" turns it off.
+# PRELOAD_MODELS is a comma-separated list: ner_en, ner_hi, ner_multi, mt:<src>-<tgt> (e.g. mt:en-hi). "none" turns it off.
+# At most NER_MAX_MODELS (default 2) NER models stay loaded, so do not preload more NER models than that.
 MODEL_STATUS: dict = {}
 
 def model_cache_dir() -> Path:
@@ -177,6 +179,11 @@ def preload_models() -> dict:
                        f"(0.3-1.4 GB each) may fail; free space or set HF_HOME to a larger drive.")
     spec = os.getenv("PRELOAD_MODELS", "ner_en").strip().lower()
     names = [] if spec in ("", "none", "0", "off") else [n.strip() for n in spec.split(",") if n.strip()]
+    ner_names = [n for n in names if n.startswith("ner_")]
+    limit = _ner_max_models()
+    if limit and len(ner_names) > limit:
+        logger.warning(f"PRELOAD_MODELS lists {len(ner_names)} NER models but NER_MAX_MODELS is {limit}: the first "
+                       f"{len(ner_names) - limit} will be unloaded again. Raise NER_MAX_MODELS or preload fewer.")
     for name in names:
         t0 = time.perf_counter()
         try:
@@ -660,22 +667,60 @@ def _hf_ner_pipeline(model: str):
             raise
         return pipeline("ner", model=model, tokenizer=_plain_fast_tokenizer(model), aggregation_strategy="first")
 
+# Memory limit: each NER model takes about 0.9-1.1 GB of RAM once loaded (measured), and the app has three (English, Indian, multilingual).
+# At most NER_MAX_MODELS stay loaded; when another one is needed, the least recently used is dropped (it is loaded again, in 20-30 s, if needed later).
+# 0 means no limit. The dict keeps insertion order, so "most recently used" = moved to the end.
+_ner_cache_lock = threading.Lock()      # guards the dict
+_ner_load_lock = threading.Lock()       # one model load at a time, so two requests never load the same model twice
+
+def _ner_max_models() -> int:
+    try:
+        return max(0, int(os.getenv("NER_MAX_MODELS", "2")))
+    except ValueError:
+        return 2
+
+def _evict_ner_models():
+    """Drop the least recently used pipelines until the limit holds (call with _ner_cache_lock held)."""
+    limit = _ner_max_models()
+    dropped = []
+    while limit and len(_ner_pipelines) > limit:
+        oldest = next(iter(_ner_pipelines))
+        del _ner_pipelines[oldest]
+        dropped.append(oldest)
+    if dropped:
+        import gc
+        gc.collect()                    # a request still using a dropped model keeps its own reference until it finishes
+        logger.info(f"NER memory limit ({limit} models): unloaded {', '.join(dropped)}")
+
+def _load_ner_pipeline(model: str, lang: str):
+    onnx_dir = os.getenv("NER_ONNX_DIR", "").strip()
+    onnx_file = os.getenv("NER_ONNX_FILE", "model_int8.onnx").strip()
+    if lang == "en" and onnx_dir and Path(onnx_dir, onnx_file).exists():
+        # exported with export_onnx_ner.py (model.onnx = fp32, model_int8.onnx = INT8)
+        import onnx_ner
+        logger.info(f"Loading ONNX NER model {onnx_dir}/{onnx_file} …")
+        return onnx_ner.load_pipeline(onnx_dir, file=onnx_file, threads=os.getenv("TORCH_THREADS") or None)
+    logger.info(f"Loading NER model {model} …")
+    return _hf_ner_pipeline(model)
+
 def get_ner_pipeline(lang: str = "en"):
-    """Lazy-load one NER pipeline per model; English text uses the English model."""
+    """Lazy-load one NER pipeline per model (English text uses the English model), keeping at most NER_MAX_MODELS loaded."""
     model = ner_model_name(lang)
-    if model not in _ner_pipelines:
-        onnx_dir = os.getenv("NER_ONNX_DIR", "").strip()
-        onnx_file = os.getenv("NER_ONNX_FILE", "model_int8.onnx").strip()
-        if lang == "en" and onnx_dir and Path(onnx_dir, onnx_file).exists():
-            # exported with export_onnx_ner.py (model.onnx = fp32, model_int8.onnx = INT8)
-            import onnx_ner
-            logger.info(f"Loading ONNX NER model {onnx_dir}/{onnx_file} …")
-            _ner_pipelines[model] = onnx_ner.load_pipeline(onnx_dir, file=onnx_file, threads=os.getenv("TORCH_THREADS") or None)
-        else:
-            logger.info(f"Loading NER model {model} …")
-            _ner_pipelines[model] = _hf_ner_pipeline(model)
+    with _ner_cache_lock:
+        if model in _ner_pipelines:
+            nlp = _ner_pipelines.pop(model)
+            _ner_pipelines[model] = nlp                     # mark as most recently used
+            return nlp
+    with _ner_load_lock:
+        with _ner_cache_lock:                               # another request may have loaded it while we waited
+            if model in _ner_pipelines:
+                return _ner_pipelines[model]
+        nlp = _load_ner_pipeline(model, lang)
+        with _ner_cache_lock:
+            _ner_pipelines[model] = nlp
+            _evict_ner_models()
         logger.info("NER model loaded.")
-    return _ner_pipelines[model]
+        return nlp
 
 # Chinese and Japanese are written without spaces, so "the whole word" is the whole clause. For them entities are grouped from word pieces
 # (aggregation "simple") and are not grown to the nearest space or punctuation mark.
@@ -743,19 +788,31 @@ def normalize_lang(code: str) -> str:
     """langdetect returns e.g. 'zh-cn' / 'zh-tw'; the app and translators use the base code."""
     return (code or "").strip().lower().split("-")[0].split("_")[0]
 
+DEVANAGARI_LANGS = {"hi", "mr", "ne"}         # the Devanagari languages langdetect knows
+
 def detect_language(text: str) -> Optional[str]:
     """Return the detected base language code, or None if detection fails.
 
     Hindi typed in English letters ("Rahul kal Mumbai ja raha hai") is reported as "hi": langdetect has no profile for it (it said Indonesian, Swahili or English),
     while the Hindi NER model reads it well (strict F1 0.94 on 125 test sentences against 0.71 for the old multilingual model; evaluation/RESULTS.md).
+
+    Indian scripts are decided by the script first (script_lang.py): Odia, Punjabi, Gujarati, Tamil, Telugu, Kannada and Malayalam each have their
+    own script, Bengali script is Bengali or Assamese (Assamese letters), and Devanagari goes to langdetect (Hindi / Marathi / Nepali) with Hindi as
+    the fallback. Before this, Odia made langdetect fail, so Odia text was treated as English.
     """
     if hinglish.is_romanized_hindi(text):
         return "hi"
+    script = script_lang.script_language(text)
+    if script and script != "deva":
+        return script
     try:
         from langdetect import detect
-        return normalize_lang(detect(text))
+        lang = normalize_lang(detect(text))
     except Exception:
-        return None
+        lang = None
+    if script == "deva" and lang not in DEVANAGARI_LANGS:
+        return "hi"                                 # Devanagari text that langdetect could not place (or placed outside Devanagari languages)
+    return lang
 
 # -------------------------------------------------------
 # Response builder
@@ -858,7 +915,8 @@ def list_languages():
 def health_models():
     """Which models are loaded in memory right now, and the result of the startup preload."""
     return {"preload": MODEL_STATUS, "disk": disk_status(),
-            "ner_loaded": sorted(_ner_pipelines),
+            "ner_loaded": list(_ner_pipelines),               # least recently used first
+            "ner_max_models": _ner_max_models(),
             "translation_loaded": local_translator.loaded_engines()}
 
 # ── Auth ────────────────────────────────────────────────
@@ -1147,7 +1205,12 @@ def upload_document(file: UploadFile = File(...), current_user: UserDB = Depends
         except doc_extract.ExtractionError as e:
             raise HTTPException(status_code=400, detail=str(e))
     finally:
-        tmp_path.unlink(missing_ok=True)
+        # On Windows a virus scanner or a sync tool can hold a just-written file for a moment; a failed delete must not replace the real answer
+        # (for example "No text") with a server error. A leftover file is removed by _purge_old() later.
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not delete the temporary upload {tmp_path.name} ({e}); it will be purged later")
 
     if len(text) > MAX_DOC_CHARS:
         raise HTTPException(
