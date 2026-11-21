@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
-
-const BACKEND_URL = Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://127.0.0.1:8000';
+import { BACKEND_URL } from '../config';
 
 interface RegisterScreenProps {
   onSwitchToLogin: () => void;
@@ -23,6 +22,10 @@ export default function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps)
       setError('Please fill in all fields');
       return;
     }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
     if (password !== confirmPassword) {
       setError('Passwords do not match');
       return;
@@ -32,10 +35,10 @@ export default function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps)
     setError('');
     try {
       // Register
-      await axios.post(`${BACKEND_URL}/api/auth/register`, { username, email, password });
+      await axios.post(`${BACKEND_URL}/api/auth/register`, { username: username.trim(), email: email.trim(), password });
       
       // Auto-login
-      const loginRes = await axios.post(`${BACKEND_URL}/api/auth/login`, { username, password });
+      const loginRes = await axios.post(`${BACKEND_URL}/api/auth/login`, { username: username.trim(), password });
       const token = loginRes.data.access_token;
       
       const userRes = await axios.get(`${BACKEND_URL}/api/auth/me`, {
@@ -44,7 +47,8 @@ export default function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps)
       
       await login(token, userRes.data);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Registration failed. Please try again.');
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }

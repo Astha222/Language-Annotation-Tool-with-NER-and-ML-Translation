@@ -1,9 +1,37 @@
+# dependencies and build output
 node_modules/
 __pycache__/
 *.pyc
 venv/
 .venv/
-.env
 .expo/
+dist/
+web-build/
+
+# secrets and local data - never commit these
+.env
+.env.*
+!.env.example
 *.db
 *.sqlite
+
+# test and tooling caches
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# downloaded benchmark data and run logs (evaluation/RESULTS.md is committed, the data is not)
+evaluation/data/*
+# keep only the checksums of the frozen test data (the data itself is downloaded by download_data.py)
+!evaluation/data/MANIFEST.json
+evaluation/*.log
+# saved predictions of every evaluation run (100+ MB; regenerate with run_all.py)
+evaluation/runs/
+
+# editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
