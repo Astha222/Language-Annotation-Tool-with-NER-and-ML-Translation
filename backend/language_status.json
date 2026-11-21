@@ -1,0 +1,598 @@
+{
+  "generated": "2026-11-17",
+  "thresholds": {
+    "stable_f1": 0.75,
+    "stable_ci_low": 0.7,
+    "stable_min_sentences": 500,
+    "experimental_below": 0.5
+  },
+  "languages": [
+    {
+      "code": "hi",
+      "name": "Hindi",
+      "priority": 1,
+      "offered_in_app": true,
+      "ner": {
+        "status": "beta",
+        "reasons": [
+          "no test made by native speakers yet"
+        ],
+        "test_set": "Naamapadam Hindi gold test",
+        "model": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+        "licence": "CC0-1.0",
+        "f1": 0.827,
+        "ci": [
+          0.807,
+          0.847
+        ],
+        "sentences": 864,
+        "best_open_candidate": "indicbert_hi",
+        "alternatives": [
+          {
+            "key": "indicner",
+            "f1": 0.704,
+            "ci": [
+              0.682,
+              0.726
+            ],
+            "sentences": 864,
+            "model": "ai4bharat/IndicNER",
+            "licence": "MIT",
+            "open": true
+          },
+          {
+            "key": "davlan_multi",
+            "f1": 0.65,
+            "ci": [
+              0.626,
+              0.675
+            ],
+            "sentences": 864,
+            "model": "Davlan/xlm-roberta-base-wikiann-ner",
+            "licence": "none declared",
+            "open": false
+          }
+        ]
+      },
+      "translation": {
+        "status": "beta",
+        "note": "offline IndicTrans2 scored chrF++ 35.2 against Azure's 36.0 on 40 WMT24++ segments (a small sample)"
+      },
+      "azure_translation_works": true
+    },
+    {
+      "code": "mr",
+      "name": "Marathi",
+      "priority": 2,
+      "offered_in_app": true,
+      "ner": {
+        "status": "beta",
+        "reasons": [
+          "no test made by native speakers yet"
+        ],
+        "test_set": "Naamapadam mr gold test",
+        "model": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+        "licence": "CC0-1.0",
+        "f1": 0.831,
+        "ci": [
+          0.808,
+          0.851
+        ],
+        "sentences": 1060,
+        "best_open_candidate": "indicbert_hi",
+        "alternatives": [
+          {
+            "key": "indicner",
+            "f1": 0.544,
+            "ci": [
+              0.517,
+              0.569
+            ],
+            "sentences": 1060,
+            "model": "ai4bharat/IndicNER",
+            "licence": "MIT",
+            "open": true
+          },
+          {
+            "key": "davlan_multi",
+            "f1": 0.627,
+            "ci": [
+              0.6,
+              0.653
+            ],
+            "sentences": 1060,
+            "model": "Davlan/xlm-roberta-base-wikiann-ner",
+            "licence": "none declared",
+            "open": false
+          }
+        ]
+      },
+      "translation": {
+        "status": "not_evaluated",
+        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+      },
+      "azure_translation_works": true
+    },
+    {
+      "code": "bn",
+      "name": "Bengali",
+      "priority": 3,
+      "offered_in_app": true,
+      "ner": {
+        "status": "beta",
+        "reasons": [
+          "no test made by native speakers yet"
+        ],
+        "test_set": "Naamapadam bn gold test",
+        "model": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+        "licence": "CC0-1.0",
+        "f1": 0.808,
+        "ci": [
+          0.776,
+          0.835
+        ],
+        "sentences": 607,
+        "best_open_candidate": "indicbert_hi",
+        "alternatives": [
+          {
+            "key": "indicner",
+            "f1": 0.709,
+            "ci": [
+              0.675,
+              0.742
+            ],
+            "sentences": 607,
+            "model": "ai4bharat/IndicNER",
+            "licence": "MIT",
+            "open": true
+          },
+          {
+            "key": "davlan_multi",
+            "f1": 0.526,
+            "ci": [
+              0.484,
+              0.571
+            ],
+            "sentences": 607,
+            "model": "Davlan/xlm-roberta-base-wikiann-ner",
+            "licence": "none declared",
+            "open": false
+          }
+        ]
+      },
+      "translation": {
+        "status": "not_evaluated",
+        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+      },
+      "azure_translation_works": true
+    },
+    {
+      "code": "ta",
+      "name": "Tamil",
+      "priority": 4,
+      "offered_in_app": true,
+      "ner": {
+        "status": "beta",
+        "reasons": [
+          "no test made by native speakers yet"
+        ],
+        "test_set": "Naamapadam ta gold test",
+        "model": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+        "licence": "CC0-1.0",
+        "f1": 0.75,
+        "ci": [
+          0.724,
+          0.778
+        ],
+        "sentences": 758,
+        "best_open_candidate": "indicbert_hi",
+        "alternatives": [
+          {
+            "key": "indicner",
+            "f1": 0.608,
+            "ci": [
+              0.581,
+              0.637
+            ],
+            "sentences": 758,
+            "model": "ai4bharat/IndicNER",
+            "licence": "MIT",
+            "open": true
+          },
+          {
+            "key": "davlan_multi",
+            "f1": 0.501,
+            "ci": [
+              0.47,
+              0.528
+            ],
+            "sentences": 758,
+            "model": "Davlan/xlm-roberta-base-wikiann-ner",
+            "licence": "none declared",
+            "open": false
+          }
+        ]
+      },
+      "translation": {
+        "status": "not_evaluated",
+        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+      },
+      "azure_translation_works": true
+    },
+    {
+      "code": "te",
+      "name": "Telugu",
+      "priority": 5,
+      "offered_in_app": true,
+      "ner": {
+        "status": "beta",
+        "reasons": [
+          "no test made by native speakers yet"
+        ],
+        "test_set": "Naamapadam te gold test",
+        "model": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+        "licence": "CC0-1.0",
+        "f1": 0.854,
+        "ci": [
+          0.828,
+          0.876
+        ],
+        "sentences": 847,
+        "best_open_candidate": "indicbert_hi",
+        "alternatives": [
+          {
+            "key": "indicner",
+            "f1": 0.676,
+            "ci": [
+              0.643,
+              0.706
+            ],
+            "sentences": 847,
+            "model": "ai4bharat/IndicNER",
+            "licence": "MIT",
+            "open": true
+          },
+          {
+            "key": "davlan_multi",
+            "f1": 0.653,
+            "ci": [
+              0.616,
+              0.685
+            ],
+            "sentences": 847,
+            "model": "Davlan/xlm-roberta-base-wikiann-ner",
+            "licence": "none declared",
+            "open": false
+          }
+        ]
+      },
+      "translation": {
+        "status": "not_evaluated",
+        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+      },
+      "azure_translation_works": true
+    },
+    {
+      "code": "gu",
+      "name": "Gujarati",
+      "priority": 6,
+      "offered_in_app": true,
+      "ner": {
+        "status": "beta",
+        "reasons": [
+          "no test made by native speakers yet"
+        ],
+        "test_set": "Naamapadam gu gold test",
+        "model": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+        "licence": "CC0-1.0",
+        "f1": 0.825,
+        "ci": [
+          0.804,
+          0.846
+        ],
+        "sentences": 1076,
+        "best_open_candidate": "indicbert_hi",
+        "alternatives": [
+          {
+            "key": "indicner",
+            "f1": 0.728,
+            "ci": [
+              0.704,
+              0.751
+            ],
+            "sentences": 1076,
+            "model": "ai4bharat/IndicNER",
+            "licence": "MIT",
+            "open": true
+          },
+          {
+            "key": "davlan_multi",
+            "f1": 0.62,
+            "ci": [
+              0.591,
+              0.649
+            ],
+            "sentences": 1076,
+            "model": "Davlan/xlm-roberta-base-wikiann-ner",
+            "licence": "none declared",
+            "open": false
+          }
+        ]
+      },
+      "translation": {
+        "status": "not_evaluated",
+        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+      },
+      "azure_translation_works": true
+    },
+    {
+      "code": "kn",
+      "name": "Kannada",
+      "priority": 7,
+      "offered_in_app": true,
+      "ner": {
+        "status": "beta",
+        "reasons": [
+          "no test made by native speakers yet"
+        ],
+        "test_set": "Naamapadam kn gold test",
+        "model": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+        "licence": "CC0-1.0",
+        "f1": 0.826,
+        "ci": [
+          0.803,
+          0.847
+        ],
+        "sentences": 1003,
+        "best_open_candidate": "indicbert_hi",
+        "alternatives": [
+          {
+            "key": "indicner",
+            "f1": 0.712,
+            "ci": [
+              0.687,
+              0.737
+            ],
+            "sentences": 1003,
+            "model": "ai4bharat/IndicNER",
+            "licence": "MIT",
+            "open": true
+          },
+          {
+            "key": "davlan_multi",
+            "f1": 0.594,
+            "ci": [
+              0.561,
+              0.623
+            ],
+            "sentences": 1003,
+            "model": "Davlan/xlm-roberta-base-wikiann-ner",
+            "licence": "none declared",
+            "open": false
+          }
+        ]
+      },
+      "translation": {
+        "status": "not_evaluated",
+        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+      },
+      "azure_translation_works": true
+    },
+    {
+      "code": "ml",
+      "name": "Malayalam",
+      "priority": 8,
+      "offered_in_app": true,
+      "ner": {
+        "status": "beta",
+        "reasons": [
+          "no test made by native speakers yet"
+        ],
+        "test_set": "Naamapadam ml gold test",
+        "model": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+        "licence": "CC0-1.0",
+        "f1": 0.847,
+        "ci": [
+          0.825,
+          0.867
+        ],
+        "sentences": 965,
+        "best_open_candidate": "indicbert_hi",
+        "alternatives": [
+          {
+            "key": "indicner",
+            "f1": 0.721,
+            "ci": [
+              0.694,
+              0.749
+            ],
+            "sentences": 965,
+            "model": "ai4bharat/IndicNER",
+            "licence": "MIT",
+            "open": true
+          },
+          {
+            "key": "davlan_multi",
+            "f1": 0.647,
+            "ci": [
+              0.614,
+              0.678
+            ],
+            "sentences": 965,
+            "model": "Davlan/xlm-roberta-base-wikiann-ner",
+            "licence": "none declared",
+            "open": false
+          }
+        ]
+      },
+      "translation": {
+        "status": "not_evaluated",
+        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+      },
+      "azure_translation_works": true
+    },
+    {
+      "code": "pa",
+      "name": "Punjabi",
+      "priority": 9,
+      "offered_in_app": true,
+      "ner": {
+        "status": "beta",
+        "reasons": [
+          "F1 0.73 is below 0.75",
+          "no test made by native speakers yet"
+        ],
+        "test_set": "Naamapadam pa gold test",
+        "model": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+        "licence": "CC0-1.0",
+        "f1": 0.732,
+        "ci": [
+          0.706,
+          0.756
+        ],
+        "sentences": 993,
+        "best_open_candidate": "indicbert_hi",
+        "alternatives": [
+          {
+            "key": "indicner",
+            "f1": 0.587,
+            "ci": [
+              0.56,
+              0.614
+            ],
+            "sentences": 993,
+            "model": "ai4bharat/IndicNER",
+            "licence": "MIT",
+            "open": true
+          },
+          {
+            "key": "davlan_multi",
+            "f1": 0.461,
+            "ci": [
+              0.428,
+              0.491
+            ],
+            "sentences": 993,
+            "model": "Davlan/xlm-roberta-base-wikiann-ner",
+            "licence": "none declared",
+            "open": false
+          }
+        ]
+      },
+      "translation": {
+        "status": "not_evaluated",
+        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+      },
+      "azure_translation_works": true
+    },
+    {
+      "code": "or",
+      "name": "Odia",
+      "priority": 10,
+      "offered_in_app": false,
+      "ner": {
+        "status": "experimental",
+        "reasons": [
+          "F1 0.27 is below 0.50"
+        ],
+        "test_set": "Naamapadam or gold test",
+        "model": "ai4bharat/IndicNER",
+        "licence": "MIT",
+        "f1": 0.271,
+        "ci": [
+          0.204,
+          0.33
+        ],
+        "sentences": 994,
+        "best_open_candidate": "indicner",
+        "alternatives": [
+          {
+            "key": "indicbert_hi",
+            "f1": 0.167,
+            "ci": [
+              0.139,
+              0.196
+            ],
+            "sentences": 994,
+            "model": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+            "licence": "CC0-1.0",
+            "open": true
+          },
+          {
+            "key": "davlan_multi",
+            "f1": 0.127,
+            "ci": [
+              0.098,
+              0.156
+            ],
+            "sentences": 994,
+            "model": "Davlan/xlm-roberta-base-wikiann-ner",
+            "licence": "none declared",
+            "open": false
+          }
+        ]
+      },
+      "translation": {
+        "status": "not_evaluated",
+        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+      },
+      "azure_translation_works": true
+    },
+    {
+      "code": "as",
+      "name": "Assamese",
+      "priority": 11,
+      "offered_in_app": false,
+      "ner": {
+        "status": "beta",
+        "reasons": [
+          "F1 0.50 is below 0.75",
+          "the lower end of the 95% range (0.29) is below 0.70",
+          "only 51 test sentences (needs 500)",
+          "no test made by native speakers yet"
+        ],
+        "test_set": "Naamapadam as gold test",
+        "model": "ai4bharat/IndicNER",
+        "licence": "MIT",
+        "f1": 0.5,
+        "ci": [
+          0.291,
+          0.732
+        ],
+        "sentences": 51,
+        "best_open_candidate": "indicner",
+        "alternatives": [
+          {
+            "key": "indicbert_hi",
+            "f1": 0.467,
+            "ci": [
+              0.3,
+              0.609
+            ],
+            "sentences": 51,
+            "model": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+            "licence": "CC0-1.0",
+            "open": true
+          },
+          {
+            "key": "davlan_multi",
+            "f1": 0.196,
+            "ci": [
+              0.053,
+              0.32
+            ],
+            "sentences": 51,
+            "model": "Davlan/xlm-roberta-base-wikiann-ner",
+            "licence": "none declared",
+            "open": false
+          }
+        ]
+      },
+      "translation": {
+        "status": "not_evaluated",
+        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+      },
+      "azure_translation_works": true
+    }
+  ]
+}

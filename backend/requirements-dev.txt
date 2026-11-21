@@ -1,0 +1,6 @@
+-r requirements.txt
+
+pytest>=8
+httpx>=0.27          # FastAPI's TestClient
+reportlab>=4         # builds sample PDFs for the extraction tests
+sacrebleu>=2.4       # BLEU / chrF++ for evaluation/eval_translation.py

@@ -1,0 +1,42 @@
+# 40 fresh Hinglish sentences for checking backend/hinglish.py AFTER its word list was extended using the main test set. Written before the extension was run; never used to tune.
+# Plain sentences (no entity markup). Drafted by the assistant; native-speaker review pending.
+tumhara naam kya hai aur tum kahan rehte ho ?
+main kal office nahi aaunga , tabiyat theek nahi hai .
+yeh restaurant bahut mehenga hai , chalo kahin aur chalte hain .
+Sharma ji ne bataya ki meeting kal subah hogi .
+mujhe lagta hai ki hum late ho gaye hain .
+Kolkata ka mausam aaj bahut accha hai .
+usne mujhse kaha ki woh shaam tak call karega .
+Amazon se jo phone mangwaya tha woh kharab nikla .
+kitne baje ki flight hai tumhari ?
+Pune mein naya mall khula hai , wahan jaana hai kabhi .
+bhai paise kab wapas karega tu ?
+meri mummy ne aaj paneer banaya hai .
+Rohit ne bola ki party kal raat ko hai .
+isme koi dikkat nahi hai , tum bejhijhak karo .
+hamari company ne is saal bahut profit kamaya .
+Mumbai local mein safar karna bada mushkil hota hai .
+aap please yeh form bhar dijiye aur submit kar dijiye .
+mujhe Hindi gaane sunna bahut pasand hai .
+Priya ko exam mein pass hone ki khushi hai .
+woh log kab aa rahe hain humare ghar ?
+kal Delhi mein bahut dhund thi , kuch dikh hi nahi raha tha .
+tumne meri baat suni ya nahi ?
+Google par search kiya lekin kuch nahi mila .
+uska bhai Dubai mein job karta hai .
+ab kya karein , samajh nahi aa raha hai .
+hum Jaipur ghumne ja rahe hain agle hafte .
+Neha ki shaadi December mein hai .
+yaar tu na bahut mazaakiya hai .
+Tata ke naye plant ki opening hai kal .
+yahan se station kitni door hai ?
+kya aap mujhe Lucknow ka rasta bata sakte hain ?
+uski tabiyat kharab hai isliye woh school nahi aaya .
+Amit ne apna phone Flipkart se kharida .
+mujhe thoda time chahiye , abhi main busy hoon .
+sab log Goa jaane ke liye taiyar hain .
+unhone kaha ki woh jaldi hi wapas aayenge .
+Zomato wale ne galat order bhej diya yaar .
+yeh kaam kal tak ho jayega , tension mat lo .
+humein Chennai se Bangalore ki train leni hai .
+aaj ka match bahut kaante ka tha .

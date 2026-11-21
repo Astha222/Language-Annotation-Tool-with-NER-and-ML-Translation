@@ -1,0 +1,455 @@
+{
+  "created": "2026-11-18",
+  "files": [
+    {
+      "dataset": "wikiann",
+      "lang": "en",
+      "split": "test",
+      "role": "test",
+      "sentences": 10000,
+      "source": "https://huggingface.co/datasets/tner/wikiann/resolve/main/dataset/en/test.jsonl",
+      "file": "ner/wikiann/en_test.jsonl",
+      "sha256": "c95b5c8b0e18aafc54f352efc5ddfd6637226b33d0260ebee7445b2495d59e69"
+    },
+    {
+      "dataset": "wikiann",
+      "lang": "en",
+      "split": "dev",
+      "role": "dev",
+      "sentences": 10000,
+      "source": "https://huggingface.co/datasets/tner/wikiann/resolve/main/dataset/en/dev.jsonl",
+      "file": "ner/wikiann/en_dev.jsonl",
+      "sha256": "85419db22121e4d3f8237de07d95525563081bc5f5578032ba3bfdd560a32e85"
+    },
+    {
+      "dataset": "wikiann",
+      "lang": "hi",
+      "split": "test",
+      "role": "test",
+      "sentences": 1000,
+      "source": "https://huggingface.co/datasets/tner/wikiann/resolve/main/dataset/hi/test.jsonl",
+      "file": "ner/wikiann/hi_test.jsonl",
+      "sha256": "b129dc9ade4e05c63e79f35a63d46901699202e7760713720f99d5fb870e9071"
+    },
+    {
+      "dataset": "wikiann",
+      "lang": "hi",
+      "split": "dev",
+      "role": "dev",
+      "sentences": 1000,
+      "source": "https://huggingface.co/datasets/tner/wikiann/resolve/main/dataset/hi/dev.jsonl",
+      "file": "ner/wikiann/hi_dev.jsonl",
+      "sha256": "2a1884312b78e8acb9007c747e90925ecb6223ea0b71943547f101044c31c7b9"
+    },
+    {
+      "dataset": "wikiann",
+      "lang": "fr",
+      "split": "test",
+      "role": "test",
+      "sentences": 10000,
+      "source": "https://huggingface.co/datasets/tner/wikiann/resolve/main/dataset/fr/test.jsonl",
+      "file": "ner/wikiann/fr_test.jsonl",
+      "sha256": "647709f00e1bb419ec68ac938d95f95fe90969db3f123d4e34f7ffd63c5a51a6"
+    },
+    {
+      "dataset": "wikiann",
+      "lang": "fr",
+      "split": "dev",
+      "role": "dev",
+      "sentences": 10000,
+      "source": "https://huggingface.co/datasets/tner/wikiann/resolve/main/dataset/fr/dev.jsonl",
+      "file": "ner/wikiann/fr_dev.jsonl",
+      "sha256": "2dd00c34125ad586b652be0eb108215be672287cd28444fce95d445bba5b6a61"
+    },
+    {
+      "dataset": "wikiann",
+      "lang": "es",
+      "split": "test",
+      "role": "test",
+      "sentences": 10000,
+      "source": "https://huggingface.co/datasets/tner/wikiann/resolve/main/dataset/es/test.jsonl",
+      "file": "ner/wikiann/es_test.jsonl",
+      "sha256": "43e81342effd4b1ef6fa96d9b5f3d28f8079573df56bf812b43d8ee2a75b4b07"
+    },
+    {
+      "dataset": "wikiann",
+      "lang": "es",
+      "split": "dev",
+      "role": "dev",
+      "sentences": 10000,
+      "source": "https://huggingface.co/datasets/tner/wikiann/resolve/main/dataset/es/dev.jsonl",
+      "file": "ner/wikiann/es_dev.jsonl",
+      "sha256": "84144546ea855e33d94a3bed264146b2341e58242777c13a997d8d5f3d15020b"
+    },
+    {
+      "dataset": "conll2003",
+      "lang": "en",
+      "split": "test",
+      "role": "test",
+      "sentences": 3453,
+      "source": "https://huggingface.co/datasets/tner/conll2003/resolve/main/dataset/test.json",
+      "file": "ner/conll2003/en_test.jsonl",
+      "sha256": "543d6ca831ff823113839b26408666baf55a4ae8a4964afafd1b1e4f40a66dc2"
+    },
+    {
+      "dataset": "wnut2017",
+      "lang": "en",
+      "split": "test",
+      "role": "test",
+      "sentences": 1287,
+      "source": "https://huggingface.co/datasets/tner/wnut2017/resolve/main/dataset/test.json",
+      "file": "ner/wnut2017/en_test.jsonl",
+      "sha256": "c11fc99a4286981437a79d480fb707c1f61820525aefddb5a56a3372f47820fd"
+    },
+    {
+      "dataset": "wnut2017",
+      "lang": "en",
+      "split": "valid",
+      "role": "dev",
+      "sentences": 1009,
+      "source": "https://huggingface.co/datasets/tner/wnut2017/resolve/main/dataset/valid.json",
+      "file": "ner/wnut2017/en_valid.jsonl",
+      "sha256": "433e381e58bf7697a7670c6ab408d3c9b54deff30c0523dfae0f7301f8ea28e6"
+    },
+    {
+      "dataset": "btc",
+      "lang": "en",
+      "split": "test",
+      "role": "test",
+      "sentences": 2000,
+      "source": "https://huggingface.co/datasets/tner/btc/resolve/main/dataset/test.json",
+      "file": "ner/btc/en_test.jsonl",
+      "sha256": "84f086663e04e470beeb1cf258d1686a7736309d767dc602ac8ae84ba8cc16cb"
+    },
+    {
+      "dataset": "btc",
+      "lang": "en",
+      "split": "valid",
+      "role": "dev",
+      "sentences": 1001,
+      "source": "https://huggingface.co/datasets/tner/btc/resolve/main/dataset/valid.json",
+      "file": "ner/btc/en_valid.jsonl",
+      "sha256": "517a65a1c10af1dff4f5cfaa27530cf1bbcf78a5ab85341ff42083fc5aec975d"
+    },
+    {
+      "dataset": "fin",
+      "lang": "en",
+      "split": "test",
+      "role": "test",
+      "sentences": 305,
+      "source": "https://huggingface.co/datasets/tner/fin/resolve/main/dataset/test.json",
+      "file": "ner/fin/en_test.jsonl",
+      "sha256": "d60808c4b8a1a74ab4474da0379616d65c455de0c9a1a2a72ce3511dacacf470"
+    },
+    {
+      "dataset": "fin",
+      "lang": "en",
+      "split": "valid",
+      "role": "dev",
+      "sentences": 150,
+      "source": "https://huggingface.co/datasets/tner/fin/resolve/main/dataset/valid.json",
+      "file": "ner/fin/en_valid.jsonl",
+      "sha256": "1900660f810bb846e527519e3156cee76fc7ab7d49c303ca73be221e9bc74348"
+    },
+    {
+      "dataset": "naamapadam",
+      "lang": "hi",
+      "split": "test",
+      "role": "test",
+      "sentences": 867,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/hi_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_hi/naamapadam/hi_test.json",
+      "sha256": "346755991b6835677606586cac7040c86b440b9be02602dbe8d812ae9b8728b0"
+    },
+    {
+      "dataset": "naamapadam",
+      "lang": "hi",
+      "split": "val",
+      "role": "dev",
+      "sentences": 13460,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/hi_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_hi/naamapadam/hi_val.json",
+      "sha256": "6c088005d26b2b372c439c0678afb76269e0e4823f1a994aa3b24c3e4655f2a1"
+    },
+    {
+      "dataset": "hiner",
+      "lang": "hi",
+      "split": "test",
+      "role": "test",
+      "sentences": 3094,
+      "source": "huggingface.co/datasets/cfilt/HiNER-collapsed (data/test.json, every 7th sentence of 21,657, CC-BY-SA-4.0)",
+      "file": "ner_hi/hiner/hi_test.json",
+      "sha256": "9de5c91ec7cec9470be40ddcaa16f33e4490e0d22dc558d6fa60db9b187da361"
+    },
+    {
+      "dataset": "mc_de",
+      "lang": "de",
+      "split": "dev",
+      "role": "test",
+      "sentences": 512,
+      "source": "huggingface.co/datasets/MultiCoNER/multiconer_v2 (DE-German/de_dev.conll, CC-BY-4.0)",
+      "file": "ner_multi/mc_de_dev.json",
+      "sha256": "02eca5810328468ffd20915f560e972a94cbb493b2225e2a4e44535839140afe"
+    },
+    {
+      "dataset": "mc_es",
+      "lang": "es",
+      "split": "dev",
+      "role": "test",
+      "sentences": 854,
+      "source": "huggingface.co/datasets/MultiCoNER/multiconer_v2 (ES-Spanish/es_dev.conll, CC-BY-4.0)",
+      "file": "ner_multi/mc_es_dev.json",
+      "sha256": "bbd96bd3465b7d1e512980bf72f9aa760df5e5d3bbe0ec9e8642647f82d16959"
+    },
+    {
+      "dataset": "mc_fr",
+      "lang": "fr",
+      "split": "dev",
+      "role": "test",
+      "sentences": 857,
+      "source": "huggingface.co/datasets/MultiCoNER/multiconer_v2 (FR-French/fr_dev.conll, CC-BY-4.0)",
+      "file": "ner_multi/mc_fr_dev.json",
+      "sha256": "5553862a5f035845305b83aa19bbb82aa73fbefd7c68afc77eabac0299b779e6"
+    },
+    {
+      "dataset": "mc_zh",
+      "lang": "zh",
+      "split": "dev",
+      "role": "test",
+      "sentences": 506,
+      "source": "huggingface.co/datasets/MultiCoNER/multiconer_v2 (ZH-Chinese/zh_dev.conll, CC-BY-4.0)",
+      "file": "ner_multi/mc_zh_dev.json",
+      "sha256": "46b1b7938e21090090a8c93e212e5482cdc896c7fee13c846751413423890ce5"
+    },
+    {
+      "dataset": "mc_hi",
+      "lang": "hi",
+      "split": "dev",
+      "role": "test",
+      "sentences": 514,
+      "source": "huggingface.co/datasets/MultiCoNER/multiconer_v2 (HI-Hindi/hi_dev.conll, CC-BY-4.0)",
+      "file": "ner_multi/mc_hi_dev.json",
+      "sha256": "ca5d2581222e3dfe3cc7708f52d789cca7775088a944f075a2a48b701085a353"
+    },
+    {
+      "dataset": "mc_de_tune",
+      "lang": "de",
+      "split": "tune",
+      "role": "tune",
+      "sentences": 600,
+      "source": "huggingface.co/datasets/MultiCoNER/multiconer_v2 (DE-German/de_train.conll, every k-th sentence, CC-BY-4.0)",
+      "file": "ner_multi/mc_de_tune.json",
+      "sha256": "5520e080677910bb75e19c14cff52d42978277397f7f6a9fafcf5c1b7ed90f6e"
+    },
+    {
+      "dataset": "mc_es_tune",
+      "lang": "es",
+      "split": "tune",
+      "role": "tune",
+      "sentences": 600,
+      "source": "huggingface.co/datasets/MultiCoNER/multiconer_v2 (ES-Spanish/es_train.conll, every k-th sentence, CC-BY-4.0)",
+      "file": "ner_multi/mc_es_tune.json",
+      "sha256": "2a36029bc6755284838289a406b7f02651b3d4764088a607373b6c839c116b1b"
+    },
+    {
+      "dataset": "mc_fr_tune",
+      "lang": "fr",
+      "split": "tune",
+      "role": "tune",
+      "sentences": 600,
+      "source": "huggingface.co/datasets/MultiCoNER/multiconer_v2 (FR-French/fr_train.conll, every k-th sentence, CC-BY-4.0)",
+      "file": "ner_multi/mc_fr_tune.json",
+      "sha256": "6340417e21d25467abb403d6309fe12ae23bac00eca5ee827558c9f8f610dbd2"
+    },
+    {
+      "dataset": "nm_as",
+      "lang": "as",
+      "split": "test",
+      "role": "test",
+      "sentences": 51,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/as_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_indic/as_test.json",
+      "sha256": "2b14d2c2d1ea7e440df8c06c95bcdd1b3449e36a0e623d0c26767f22d4aade27"
+    },
+    {
+      "dataset": "nm_bn",
+      "lang": "bn",
+      "split": "test",
+      "role": "test",
+      "sentences": 607,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/bn_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_indic/bn_test.json",
+      "sha256": "bafddcc164ab452b241d70e321dc513143a821e117ee3c248494fa1f8183de23"
+    },
+    {
+      "dataset": "nm_gu",
+      "lang": "gu",
+      "split": "test",
+      "role": "test",
+      "sentences": 1076,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/gu_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_indic/gu_test.json",
+      "sha256": "c3d9f15a03752c6bab7b31493414fd370d4980f4aabd8709b46dd96c10de6a90"
+    },
+    {
+      "dataset": "nm_kn",
+      "lang": "kn",
+      "split": "test",
+      "role": "test",
+      "sentences": 1019,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/kn_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_indic/kn_test.json",
+      "sha256": "dac0798fdbc25f3d8c7ea65d83ff5f46a45fd95b0222b8139cc0b0a26c6f4f80"
+    },
+    {
+      "dataset": "nm_ml",
+      "lang": "ml",
+      "split": "test",
+      "role": "test",
+      "sentences": 974,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/ml_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_indic/ml_test.json",
+      "sha256": "93552b21e49a3ffaab178442fca0bdafc18c0bc0d8e99894338d3d879b5f88e5"
+    },
+    {
+      "dataset": "nm_mr",
+      "lang": "mr",
+      "split": "test",
+      "role": "test",
+      "sentences": 1080,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/mr_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_indic/mr_test.json",
+      "sha256": "e933525c89fd095bdb4516d37de9133871b6eace41864aa294897c8adbb50a55"
+    },
+    {
+      "dataset": "nm_or",
+      "lang": "or",
+      "split": "test",
+      "role": "test",
+      "sentences": 994,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/or_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_indic/or_test.json",
+      "sha256": "0fc5733bdf8321c6626c7072be916e6a72c9dd42bd3188fbfe916565481c2425"
+    },
+    {
+      "dataset": "nm_pa",
+      "lang": "pa",
+      "split": "test",
+      "role": "test",
+      "sentences": 993,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/pa_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_indic/pa_test.json",
+      "sha256": "6dc0498618dac9ee5921c3a377f5c086e1ff58b0eedc448a2da87dcdeb4beba3"
+    },
+    {
+      "dataset": "nm_ta",
+      "lang": "ta",
+      "split": "test",
+      "role": "test",
+      "sentences": 758,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/ta_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_indic/ta_test.json",
+      "sha256": "9e30b9f37730d4729b7b91be1efc19715ce3c593f6ca79a0bf148445e38cd609"
+    },
+    {
+      "dataset": "nm_te",
+      "lang": "te",
+      "split": "test",
+      "role": "test",
+      "sentences": 847,
+      "source": "huggingface.co/datasets/ai4bharat/naamapadam (data/te_IndicNER_v1.0.zip, CC0-1.0)",
+      "file": "ner_indic/te_test.json",
+      "sha256": "f82a71da38e31eea4f78c4367bc08a884815fd6ab5e8001d7f32f3246e76179c"
+    },
+    {
+      "dataset": "hinglish",
+      "lang": "hi",
+      "split": "test",
+      "role": "test",
+      "sentences": 125,
+      "source": "evaluation/hinglish/hinglish_sentences.txt (written by the assistant, 2026-11-18; native-speaker review pending)",
+      "file": "ner_hi/hinglish/hi_test.json",
+      "sha256": "2140b18188c408b29bf1053494d12abf1838308616401e4294e599eb4c6bfdd3"
+    },
+    {
+      "dataset": "uner_ru",
+      "lang": "ru",
+      "split": "test",
+      "role": "test",
+      "sentences": 1000,
+      "source": "https://raw.githubusercontent.com/UniversalNER/UNER_Russian-PUD/master/ru_pud-ud-test.iob2 (CC-BY-SA-4.0)",
+      "file": "ner_foreign/uner_ru_test.json",
+      "sha256": "1f8600f7b4ca7c2008cc277bf6194aa1783858e00e09b41855386e298809074b"
+    },
+    {
+      "dataset": "uner_de",
+      "lang": "de",
+      "split": "test",
+      "role": "test",
+      "sentences": 1000,
+      "source": "https://raw.githubusercontent.com/UniversalNER/UNER_German-PUD/master/de_pud-ud-test.iob2 (CC-BY-SA-4.0)",
+      "file": "ner_foreign/uner_de_test.json",
+      "sha256": "d99ce8cfb6958e8d8dbbc5f48ac132d00e42628c96ecbad80fa3143c40bd5805"
+    },
+    {
+      "dataset": "uner_zh",
+      "lang": "zh",
+      "split": "test",
+      "role": "test",
+      "sentences": 1000,
+      "source": "https://raw.githubusercontent.com/UniversalNER/UNER_Chinese-PUD/master/zh_pud-ud-test.iob2 (CC-BY-SA-4.0)",
+      "file": "ner_foreign/uner_zh_test.json",
+      "sha256": "662a0a752681a842732d6807f25f68aa698f157c9f90c308e607bd56ef1bb097"
+    },
+    {
+      "dataset": "uner_zhs",
+      "lang": "zh",
+      "split": "test",
+      "role": "test",
+      "sentences": 500,
+      "source": "https://raw.githubusercontent.com/UniversalNER/UNER_Chinese-GSDSIMP/master/zh_gsdsimp-ud-test.iob2 (CC-BY-SA-4.0)",
+      "file": "ner_foreign/uner_zhs_test.json",
+      "sha256": "3de6326a519c3ccc7c2b29f7535c3411b491c5211b762c90507cc26921e9d052"
+    },
+    {
+      "dataset": "uner_en_ewt",
+      "lang": "en",
+      "split": "test",
+      "role": "test",
+      "sentences": 2077,
+      "source": "https://raw.githubusercontent.com/UniversalNER/UNER_English-EWT/master/en_ewt-ud-test.iob2 (CC-BY-SA-4.0)",
+      "file": "ner_foreign/uner_en_ewt_test.json",
+      "sha256": "48c5eb365efa80f557cf02a6a2c3c2fed1bc52f53fcfbe8ce59f8d6763667440"
+    },
+    {
+      "dataset": "uner_ja",
+      "lang": "ja",
+      "split": "test",
+      "role": "test",
+      "sentences": 1000,
+      "source": "https://raw.githubusercontent.com/UniversalNER/UNER_Japanese-PUD/master/ja_pud-ud-test.iob2 (CC-BY-SA-4.0)",
+      "file": "ner_foreign/uner_ja_test.json",
+      "sha256": "6099bf9966abb9a405198718d7fcc062c73675b9aaf1e6265b8e39fdda373150"
+    },
+    {
+      "dataset": "anercorp",
+      "lang": "ar",
+      "split": "test",
+      "role": "test",
+      "sentences": 924,
+      "source": "huggingface.co/datasets/KFUPM-JRCAI/ANERcorp_experimental (test; ANERcorp CAMeL Lab split, CC-BY-SA-4.0)",
+      "file": "ner_foreign/anercorp_test.json",
+      "sha256": "04826f62bf32a39618a0eff8992366ecde003c2b81b9ccf20a03ebbc42bfd25f"
+    },
+    {
+      "dataset": "stockmark_ja",
+      "lang": "ja",
+      "split": "test",
+      "role": "test",
+      "sentences": 5343,
+      "source": "https://huggingface.co/datasets/stockmark/ner-wikipedia-dataset/resolve/main/ner.json (CC-BY-SA-3.0)",
+      "file": "ner_foreign/stockmark_ja_test.json",
+      "sha256": "ff8aa841a171a940ab8ecb3860baf2d740283563bf4ed90075406759991c6216"
+    }
+  ]
+}
