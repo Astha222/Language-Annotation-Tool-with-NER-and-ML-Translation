@@ -100,6 +100,17 @@ def main_module():
     return main
 
 
+def _stop_job_threads(m, timeout=15):
+    """Cancel every document job still running and wait for its thread (jobs save their state to the test database)."""
+    import threading
+    with m.JOBS_LOCK:
+        for job in m.JOBS.values():
+            job["cancel"] = True
+    for t in threading.enumerate():
+        if t.name.startswith("doc-job-") and t.is_alive():
+            t.join(timeout)
+
+
 @pytest.fixture(autouse=True)
 def isolated(main_module, monkeypatch, tmp_path):
     """Fresh fake Mongo, document folder, NER stand-in and provider state for every test."""
@@ -109,8 +120,14 @@ def isolated(main_module, monkeypatch, tmp_path):
     monkeypatch.setattr(m, "_ner_pipelines", {m.NER_MODEL_EN: fake_ner_pipeline, m.NER_MODEL_MULTI: fake_ner_pipeline, m.NER_MODEL_HI: fake_ner_pipeline})
     for name in m._blocked_until:
         m._blocked_until[name] = 0.0
+    _stop_job_threads(m)
     m.JOBS.clear()
+    db = m.SessionLocal()                  # saved jobs (M6) must not leak from one test into the next
+    db.query(m.JobDB).delete()
+    db.commit()
+    db.close()
     yield
+    _stop_job_threads(m)                   # a job a test did not wait for must not write into the next test's database
 
 
 @pytest.fixture

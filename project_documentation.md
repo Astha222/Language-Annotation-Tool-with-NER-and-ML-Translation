@@ -155,7 +155,9 @@ DELETE /api/documents/{id}
 The job runs NER (this thread) and translation (a worker pool) **concurrently**, saves the annotation
 (SQL row + Mongo document, all-or-nothing) and returns a summary: translated preview, unique entities with counts,
 which engines translated, and any warnings. A translation failure never discards the entity analysis.
-Limits: 50 MB upload, 1,000,000 characters of text. Jobs live in memory (a server restart ends a running job).
+Limits: 50 MB upload, 1,000,000 characters of text. Jobs are kept in memory while they run and saved in the `jobs` table: after a server
+restart, finished jobs can still be read (`GET /api/jobs/{id}`), an interrupted job is restarted once from its saved document, and
+`GET /api/jobs` lists the user's 10 most recent jobs so the page can reconnect to a running one.
 
 `doc_extract.py` reads each format; for PDFs it additionally rebuilds paragraphs (see 5.6).
 
@@ -247,7 +249,7 @@ Errors are always `{"detail": "<readable message>"}`.
 - Offline Hindi translation runs at roughly 60 characters per second on a laptop CPU: fine for a few pages, slow for
   hundreds. Azure is much faster.
 - Machine translation can still translate names (for example the word "Gravity" in a heading) or choose literal wording.
-- The server is built for a single machine: jobs are in memory and uploads are on local disk.
+- The server is built for a single machine: uploads are on local disk (`DOC_DIR`); jobs are saved in the SQL database and survive a restart.
 - File upload works in the web app only.
 
 ### Per-language quality status (`GET /api/languages`)

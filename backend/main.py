@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, func
+from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, Float, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
 from pymongo import MongoClient
@@ -77,7 +77,8 @@ def create_access_token(data: dict) -> str:
 # -------------------------------------------------------
 # PostgreSQL Setup
 # -------------------------------------------------------
-connect_args = {"check_same_thread": False} if POSTGRES_URL.startswith("sqlite") else {}
+# SQLite: several threads write (requests and document jobs, which save their progress); wait up to 30 s for a lock instead of the default 5 s
+connect_args = {"check_same_thread": False, "timeout": 30} if POSTGRES_URL.startswith("sqlite") else {}
 engine       = create_engine(POSTGRES_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base         = declarative_base()
@@ -100,6 +101,25 @@ class AnnotationDB(Base):
     target_lang     = Column(String(10), default="fr")
     source_name     = Column(String(255), nullable=True)   # uploaded file name, if any
     owner           = relationship("UserDB", back_populates="annotations")
+
+class JobDB(Base):
+    """A document job, persisted so that it survives a server restart (M6). The in-memory JOBS dict stays the working copy."""
+    __tablename__ = "jobs"
+    id          = Column(String(32), primary_key=True)
+    user_id     = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    doc_id      = Column(String(32), nullable=False)
+    filename    = Column(String(255))
+    source_lang = Column(String(16))
+    target_lang = Column(String(16))
+    status      = Column(String(16), index=True)          # queued | running | done | error | cancelled
+    stage       = Column(String(255))
+    progress    = Column(Float, default=0.0)
+    error       = Column(Text, nullable=True)
+    warnings    = Column(Text, default="[]")              # JSON list
+    result      = Column(Text, nullable=True)             # JSON object
+    attempts    = Column(Integer, default=1)              # 2 = restarted once after a server restart
+    created     = Column(Float)
+    updated     = Column(Float)
 
 # Add columns that older databases don't have yet (safe migration)
 from sqlalchemy import inspect, text
@@ -223,6 +243,7 @@ def configure_threads():
 async def lifespan(_app):
     configure_threads()
     await asyncio.to_thread(preload_models)         # requests are accepted only after this returns
+    await asyncio.to_thread(recover_jobs)           # restart document jobs interrupted by the last shutdown (M6)
     yield
 
 app = FastAPI(title="Language Annotation Tool API", lifespan=lifespan)
@@ -1138,10 +1159,12 @@ MAX_DISPLAY_ENTITIES      = 300
 MAX_STORED_ENTITIES       = 50000       # keeps the Mongo document far below its 16 MB limit
 DOC_TTL_SECONDS           = 6 * 3600
 
-DOC_DIR = Path(tempfile.gettempdir()) / "annotationtool_docs"
+# Uploaded documents (extracted text + metadata) wait here for their analysis job. DOC_DIR can point to a persistent volume (Docker);
+# the default is the system temp folder, which survives a server restart but not always a reboot.
+DOC_DIR = Path(os.getenv("DOC_DIR", "").strip() or Path(tempfile.gettempdir()) / "annotationtool_docs")
 DOC_DIR.mkdir(parents=True, exist_ok=True)
 
-JOBS: dict = {}                 # job_id -> state (in memory; jobs end if the server restarts)
+JOBS: dict = {}                 # job_id -> state; the working copy. Every job is also saved in the "jobs" table (JobDB), so it survives a restart.
 JOBS_LOCK = threading.Lock()
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -1160,6 +1183,88 @@ def _purge_old():
     with JOBS_LOCK:
         for jid in [j for j, v in JOBS.items() if v["created"] < cutoff and v["status"] not in ("queued", "running")]:
             del JOBS[jid]
+    db = SessionLocal()
+    try:
+        db.query(JobDB).filter(JobDB.created < cutoff, JobDB.status.notin_(ACTIVE_JOB_STATES)).delete(synchronize_session=False)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Could not purge old jobs: {e}")
+    finally:
+        db.close()
+
+# ── job persistence (M6) ─────────────────────────────────────────────────
+ACTIVE_JOB_STATES = ("queued", "running")
+MAX_JOB_ATTEMPTS = 2                # a job interrupted by a restart is restarted once automatically; after that the user restarts it
+JOB_SAVE_INTERVAL = 2.0             # seconds between progress writes (status changes are always written at once)
+_JOB_FIELDS = ("id", "user_id", "doc_id", "filename", "source_lang", "target_lang", "status", "stage", "progress", "error",
+               "warnings", "result", "attempts", "created")
+
+def _save_job(job: dict, force: bool = False):
+    """Write a job's current state to the jobs table. Progress-only changes are throttled; a failure is logged and never stops the job."""
+    now = time.time()
+    with JOBS_LOCK:
+        if not force and now - job.get("_saved_at", 0.0) < JOB_SAVE_INTERVAL:
+            return
+        job["_saved_at"] = now
+        snap = {k: job.get(k) for k in _JOB_FIELDS}
+    db = SessionLocal()
+    try:
+        row = db.get(JobDB, snap["id"]) or JobDB(id=snap["id"])
+        for k, v in snap.items():
+            if k == "warnings":
+                v = json.dumps(v or [], ensure_ascii=False)
+            elif k == "result":
+                v = json.dumps(v, ensure_ascii=False) if v is not None else None
+            setattr(row, k, v)
+        row.updated = now
+        db.merge(row)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Could not save job {snap['id']}: {e}")
+    finally:
+        db.close()
+
+def _job_from_row(row: JobDB) -> dict:
+    return {"id": row.id, "user_id": row.user_id, "doc_id": row.doc_id, "filename": row.filename, "source_lang": row.source_lang,
+            "target_lang": row.target_lang, "status": row.status, "stage": row.stage, "progress": row.progress or 0.0,
+            "error": row.error, "warnings": json.loads(row.warnings or "[]"), "result": json.loads(row.result) if row.result else None,
+            "attempts": row.attempts or 1, "created": row.created or time.time(), "cancel": False}
+
+def recover_jobs() -> dict:
+    """At startup: jobs that were queued or running when the server stopped are restarted once from their saved document;
+    jobs that cannot be restarted (document expired, or already restarted once) are marked failed with a clear message."""
+    db = SessionLocal()
+    try:
+        rows = db.query(JobDB).filter(JobDB.status.in_(ACTIVE_JOB_STATES)).all()
+        jobs = [_job_from_row(r) for r in rows]
+    except Exception as e:
+        logger.warning(f"Could not read unfinished jobs: {e}")
+        return {"restarted": 0, "failed": 0}
+    finally:
+        db.close()
+    restarted = failed = 0
+    for job in jobs:
+        doc_ok = (DOC_DIR / f"{job['doc_id']}.txt").exists() and (DOC_DIR / f"{job['doc_id']}.json").exists()
+        if doc_ok and job["attempts"] < MAX_JOB_ATTEMPTS:
+            job.update(status="queued", stage="Restarting after a server restart", progress=0.0, error=None,
+                       attempts=job["attempts"] + 1)
+            with JOBS_LOCK:
+                JOBS[job["id"]] = job
+            _save_job(job, force=True)
+            threading.Thread(target=_run_document_job, args=(job["id"],), daemon=True, name=f"doc-job-{job['id'][:6]}").start()
+            restarted += 1
+        else:
+            why = "its document has expired" if not doc_ok else "it was already restarted once"
+            job.update(status="error", stage="Failed",
+                       error=f"The server restarted while this document was being processed and the job could not be resumed ({why}). "
+                             "Please upload the document and run it again.")
+            _save_job(job, force=True)
+            failed += 1
+    if restarted or failed:
+        logger.info(f"Unfinished jobs after restart: {restarted} restarted, {failed} marked failed")
+    return {"restarted": restarted, "failed": failed}
 
 def _load_doc(doc_id: str, user_id: int):
     """Return (meta, text_path) for a document this user uploaded, else 404."""
@@ -1279,6 +1384,7 @@ def _run_document_job(job_id: str):
     def update(**kw):
         with JOBS_LOCK:
             job.update(kw)
+        _save_job(job, force="status" in kw)        # a new status is written at once; stage/progress at most every JOB_SAVE_INTERVAL
 
     counters = {"ner": (0, 1), "tr": (0, 1)}
     translate_on = {"v": True}
@@ -1296,6 +1402,7 @@ def _run_document_job(job_id: str):
             if translate_on["v"]:
                 stage.append(f"Translating {int(f_tr * 100)}%")
             job["stage"] = " · ".join(stage)
+        _save_job(job)                              # throttled
 
     pool = None
     try:
@@ -1413,9 +1520,17 @@ def _public_job(job: dict) -> dict:
         return {k: job.get(k) for k in ("id", "doc_id", "filename", "status", "stage", "progress", "error", "warnings", "result")}
 
 def _own_job(job_id: str, user_id: int) -> dict:
+    """The job from memory, or from the jobs table (finished jobs from before a restart)."""
     job = JOBS.get(job_id)
+    if job is None and _ID_RE.match(job_id or ""):
+        db = SessionLocal()
+        try:
+            row = db.get(JobDB, job_id)
+            job = _job_from_row(row) if row else None
+        finally:
+            db.close()
     if not job or job["user_id"] != user_id:
-        raise HTTPException(status_code=404, detail="Job not found (the server may have restarted). Please run it again.")
+        raise HTTPException(status_code=404, detail="Job not found (it may have expired). Please run it again.")
     return job
 
 @app.post("/api/documents/{doc_id}/analyze", status_code=202)
@@ -1431,10 +1546,26 @@ def analyze_document(doc_id: str, req: DocumentAnalyzeRequest, current_user: Use
             "id": job_id, "doc_id": doc_id, "user_id": current_user.id, "filename": meta["filename"],
             "source_lang": req.source_lang, "target_lang": req.target_lang,
             "status": "queued", "stage": "Queued", "progress": 0.0, "cancel": False,
-            "error": None, "warnings": [], "result": None, "created": time.time(),
+            "error": None, "warnings": [], "result": None, "created": time.time(), "attempts": 1,
         }
+    _save_job(JOBS[job_id], force=True)
     threading.Thread(target=_run_document_job, args=(job_id,), daemon=True, name=f"doc-job-{job_id[:6]}").start()
     return {"job_id": job_id}
+
+@app.get("/api/jobs")
+def list_jobs(current_user: UserDB = Depends(get_current_user)):
+    """The user's 10 most recent jobs, newest first, so the page can reconnect to a running job after a reload or a restart."""
+    db = SessionLocal()
+    try:
+        rows = (db.query(JobDB).filter(JobDB.user_id == current_user.id).order_by(JobDB.created.desc()).limit(10).all())
+        jobs = [_job_from_row(r) for r in rows]
+    finally:
+        db.close()
+    out = []
+    for job in jobs:
+        live = JOBS.get(job["id"])                  # the in-memory copy is newer than the throttled database row
+        out.append(_public_job(live if live else job))
+    return {"jobs": out}
 
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str, current_user: UserDB = Depends(get_current_user)):
@@ -1444,5 +1575,8 @@ def get_job(job_id: str, current_user: UserDB = Depends(get_current_user)):
 def cancel_job(job_id: str, current_user: UserDB = Depends(get_current_user)):
     job = _own_job(job_id, current_user.id)
     with JOBS_LOCK:
-        job["cancel"] = True
+        live = JOBS.get(job_id)
+        if live is None or live["status"] not in ACTIVE_JOB_STATES:
+            return {"message": "This job is not running."}
+        live["cancel"] = True
     return {"message": "Cancelling"}
