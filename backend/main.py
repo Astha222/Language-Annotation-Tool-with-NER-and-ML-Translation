@@ -77,7 +77,8 @@ def create_access_token(data: dict) -> str:
 # -------------------------------------------------------
 # PostgreSQL Setup
 # -------------------------------------------------------
-connect_args = {"check_same_thread": False} if POSTGRES_URL.startswith("sqlite") else {}
+# SQLite: several threads write (requests and document jobs, which save their progress); wait up to 30 s for a lock instead of the default 5 s
+connect_args = {"check_same_thread": False, "timeout": 30} if POSTGRES_URL.startswith("sqlite") else {}
 engine       = create_engine(POSTGRES_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base         = declarative_base()
