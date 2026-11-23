@@ -1,5 +1,5 @@
 {
-  "generated": "2026-11-17",
+  "generated": "2026-11-23",
   "thresholds": {
     "stable_f1": 0.75,
     "stable_ci_low": 0.7,
@@ -56,7 +56,7 @@
       },
       "translation": {
         "status": "beta",
-        "note": "offline IndicTrans2 scored chrF++ 35.2 against Azure's 36.0 on 40 WMT24++ segments (a small sample)"
+        "note": "offline IndicTrans2 chrF++ 35.2 against Azure's 36.4 on 40 WMT24++ segments (English to hi; a small sample)"
       },
       "azure_translation_works": true
     },
@@ -108,8 +108,8 @@
         ]
       },
       "translation": {
-        "status": "not_evaluated",
-        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+        "status": "beta",
+        "note": "offline IndicTrans2 chrF++ 45.7 against Azure's 43.7 on 40 WMT24++ segments (English to mr; a small sample)"
       },
       "azure_translation_works": true
     },
@@ -161,8 +161,8 @@
         ]
       },
       "translation": {
-        "status": "not_evaluated",
-        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+        "status": "beta",
+        "note": "offline IndicTrans2 chrF++ 41.2 against Azure's 45.2 on 40 WMT24++ segments (English to bn; a small sample)"
       },
       "azure_translation_works": true
     },
@@ -214,8 +214,8 @@
         ]
       },
       "translation": {
-        "status": "not_evaluated",
-        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+        "status": "beta",
+        "note": "offline IndicTrans2 chrF++ 47.1 against Azure's 44.6 on 40 WMT24++ segments (English to ta; a small sample)"
       },
       "azure_translation_works": true
     },
@@ -267,8 +267,8 @@
         ]
       },
       "translation": {
-        "status": "not_evaluated",
-        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+        "status": "beta",
+        "note": "offline IndicTrans2 chrF++ 47.0 against Azure's 45.9 on 40 WMT24++ segments (English to te; a small sample)"
       },
       "azure_translation_works": true
     },
@@ -320,8 +320,8 @@
         ]
       },
       "translation": {
-        "status": "not_evaluated",
-        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+        "status": "beta",
+        "note": "offline IndicTrans2 chrF++ 53.4 against Azure's 45.6 on 40 WMT24++ segments (English to gu; a small sample); Azure failed on 2 of the 40 segments, which lowers its score"
       },
       "azure_translation_works": true
     },
@@ -373,8 +373,8 @@
         ]
       },
       "translation": {
-        "status": "not_evaluated",
-        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+        "status": "beta",
+        "note": "offline IndicTrans2 chrF++ 57.6 against Azure's 56.1 on 40 WMT24++ segments (English to kn; a small sample)"
       },
       "azure_translation_works": true
     },
@@ -426,8 +426,8 @@
         ]
       },
       "translation": {
-        "status": "not_evaluated",
-        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+        "status": "beta",
+        "note": "offline IndicTrans2 chrF++ 46.7 against Azure's 49.2 on 40 WMT24++ segments (English to ml; a small sample)"
       },
       "azure_translation_works": true
     },
@@ -480,8 +480,8 @@
         ]
       },
       "translation": {
-        "status": "not_evaluated",
-        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+        "status": "beta",
+        "note": "offline IndicTrans2 chrF++ 54.8 against Azure's 50.2 on 40 WMT24++ segments (English to pa; a small sample)"
       },
       "azure_translation_works": true
     },
@@ -534,7 +534,7 @@
       },
       "translation": {
         "status": "not_evaluated",
-        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+        "note": "offline IndicTrans2 available; not measured (WMT24++ has no Odia or Assamese)"
       },
       "azure_translation_works": true
     },
@@ -590,7 +590,7 @@
       },
       "translation": {
         "status": "not_evaluated",
-        "note": "Azure translated a test sentence correctly; offline IndicTrans2 has not been enabled or measured for this language"
+        "note": "offline IndicTrans2 available; not measured (WMT24++ has no Odia or Assamese)"
       },
       "azure_translation_works": true
     }

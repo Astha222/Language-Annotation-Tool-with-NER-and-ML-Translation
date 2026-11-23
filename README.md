@@ -86,13 +86,15 @@ that fails is skipped for a while.
 | Provider | Quality | Speed | Cost / limits | Privacy |
 |---|---|---|---|---|
 | `azure` - Azure AI Translator | Best of the four, in our tests (see [results](evaluation/RESULTS.md)) | Fast | Your own key; the free tier is limited (about 2 M characters/month and an hourly rate cap, per Microsoft - check current terms) | Text is sent to Microsoft |
-| `local` - open-source models | Good for Hindi (IndicTrans2); acceptable for European languages (Marian); weaker for Arabic, Chinese, Japanese | About 30-60 characters/second on a laptop CPU | Free, unlimited | **Text stays on your machine** |
+| `local` - open-source models | Good for the 11 Indian languages (IndicTrans2, close to Azure); acceptable for European languages (Marian); weaker for Arabic, Chinese, Japanese | About 30-60 characters/second on a laptop CPU | Free, unlimited | **Text stays on your machine** |
 | `google` - unofficial endpoint | Good | Fast until throttled | Rate-limited, unofficial: use at your own risk | Text is sent to Google |
 | `mymemory` | Fair | Slow | About 5,000 characters/day | Text is sent to MyMemory |
 
 The default `azure,local` uses Azure when you set a key and quietly falls back to the offline models otherwise. For a fully
-offline setup use `TRANSLATION_PROVIDERS=local`. Offline Hindi uses the MIT-licensed IndicTrans2 models; they ship their own
-Python code, so the exact reviewed commits are pinned (see [SECURITY.md](SECURITY.md)). Set `LOCAL_INDICTRANS=0` to refuse that.
+offline setup use `TRANSLATION_PROVIDERS=local`. Offline translation between English and the 11 Indian languages (Hindi, Marathi,
+Bengali, Assamese, Odia, Punjabi, Gujarati, Tamil, Telugu, Kannada, Malayalam) uses the MIT-licensed IndicTrans2 distilled models,
+one per direction for all 11 (about 0.9 GB each); they ship their own Python code, so the exact reviewed commits are pinned
+(see [SECURITY.md](SECURITY.md)). Set `LOCAL_INDICTRANS=0` to refuse that (Hindi then uses Marian; the other Indian languages need Azure).
 
 ## Documents
 
@@ -113,6 +115,9 @@ What we measured (full tables, method and caveats in [`evaluation/RESULTS.md`](e
   German, Spanish, Russian, Chinese, Arabic and Japanese. The offline models are close to Azure for Hindi (35.2 vs 36.0)
   and within 3-8 points for French, German, Spanish and Arabic. They are clearly weaker for Russian and Chinese, and
   **offline Japanese is weak** (17.9 chrF++ against Azure's 38.3, up from 4.4 after replacing the model; some outputs are still garbled, so use Azure for Japanese).
+* **Offline translation for the Indian languages (English to X, chrF++ on 40 WMT24++ segments each):** IndicTrans2 is about as good as Azure:
+  better for Marathi, Gujarati, Punjabi, Tamil, Telugu and Kannada (+1 to +8), slightly worse for Hindi and Malayalam (-1 to -3) and Bengali (-4).
+  It is much slower on a laptop CPU (7-34 characters per second). Odia and Assamese work but are not measured.
 * **English entity recognition (F1):** about 0.56-0.61 on Wikipedia text, 0.49 on noisy social media (full WNUT-2017 test set), 0.40 on Twitter and
   0.18 on financial text with the default model. Informal and financial text are hard: on Twitter most names are missed, on financial text many get the wrong type.
   Larger candidate models score 0.02-0.19 higher but are slower.
@@ -125,7 +130,8 @@ What we measured (full tables, method and caveats in [`evaluation/RESULTS.md`](e
 * **Other Indian languages (offered in the app, marked "beta"):** the same open (CC0) model, trained only on Hindi, finds names in Marathi (F1 0.83), Telugu (0.85), Malayalam (0.85),
   Gujarati (0.83), Kannada (0.83), Bengali (0.81), Tamil (0.75) and Punjabi (0.73) on human-labelled news-style test sentences. Odia (0.27) does not work and Assamese (0.50 on only 51 sentences) is uncertain.
   These tests come from the same data family as the model's training data, and for Hindi the score fell from 0.83 to 0.76 and 0.60 on independent sets, so treat the numbers as optimistic. The language buttons carry a quality badge and a note; the labels come from `backend/language_status.json` (`GET /api/languages`).
-  Translation into these languages needs an Azure key (offline translation exists only for Hindi); language detection recognises all nine (99-100% on test sentences).
+  Offline translation (IndicTrans2) covers these languages and Odia and Assamese too (see "Translation providers"); language detection recognises all of them
+  by their script (Odia 99.9%, Assamese 92%, the others 96-100% on test sentences).
 * **Other languages (strict F1 on a deliberately hard benchmark: all text lower-cased, short, no punctuation):** German 0.34, Spanish 0.31, Chinese 0.28, French 0.26.
   Ordinary text should score higher. **Not measured:** Russian, Arabic and Japanese. Chinese and Japanese entity highlighting used to cover whole clauses and was fixed.
 
@@ -153,8 +159,11 @@ an accuracy change before proposing it.
 
 ## Known limitations
 
-* Offline Hindi translation is slow on a CPU (roughly 3,500 characters a minute), so very long documents take a long time;
-  use Azure for those.
+* Offline translation for Indian languages is slow on a CPU (roughly 3,500 characters a minute), so very long documents take a
+  long time; use Azure for those. Hindi typed in English letters (Hinglish) is translated by Azure only.
+* Windows: if loading a translation model fails with `operator torchvision::nms does not exist`, the installed `torchvision`
+  package is broken or blocked (Smart App Control reports `WinError 4551` for its `_C.pyd`). The project does not use
+  `torchvision`: `pip uninstall torchvision` fixes it.
 * Machine translation can still translate names (for example the word "Gravity" in a heading) or word things literally.
 * Entity recognition makes mistakes, especially on technical terms and names it has not seen (see the accuracy numbers).
 * The server is for a single machine: jobs are kept in memory and uploads on local disk.

@@ -66,7 +66,7 @@ def test_endpoint_serves_the_table_without_login(client, monkeypatch, tmp_path):
     by_code = {l["code"]: l for l in body["languages"]}
     assert by_code["hi"]["ner"] == {"status": "beta"}                       # the generated fields are passed through unchanged
     assert by_code["hi"]["offline_translation"] is True                     # IndicTrans2 handles Hindi both ways
-    assert by_code["bn"]["offline_translation"] is False                    # Bengali needs Azure for now
+    assert by_code["bn"]["offline_translation"] is True                     # since M5 IndicTrans2 serves all 11 Indian languages
     assert isinstance(body["azure_configured"], bool)
 
 
