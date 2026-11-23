@@ -166,7 +166,8 @@ an accuracy change before proposing it.
   `torchvision`: `pip uninstall torchvision` fixes it.
 * Machine translation can still translate names (for example the word "Gravity" in a heading) or word things literally.
 * Entity recognition makes mistakes, especially on technical terms and names it has not seen (see the accuracy numbers).
-* The server is for a single machine: jobs are kept in memory and uploads on local disk.
+* The server is for a single machine: uploads are kept on local disk (`DOC_DIR`). Document jobs are saved in the SQL database, so a
+  restart does not lose them: finished jobs stay readable and an interrupted job is restarted once automatically.
 * `npm audit` reports findings in the frontend dependency tree. They are in Expo's development tooling (not part of what
   the browser runs) and in `xlsx`, which is used only to *write* spreadsheets, never to read untrusted files.
 * The Davlan model used for entity recognition in languages other than English and Hindi has no declared license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -110,6 +110,10 @@ def isolated(main_module, monkeypatch, tmp_path):
     for name in m._blocked_until:
         m._blocked_until[name] = 0.0
     m.JOBS.clear()
+    db = m.SessionLocal()                  # saved jobs (M6) must not leak from one test into the next
+    db.query(m.JobDB).delete()
+    db.commit()
+    db.close()
     yield
 
 
