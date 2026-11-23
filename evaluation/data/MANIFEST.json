@@ -362,16 +362,6 @@
       "sha256": "f82a71da38e31eea4f78c4367bc08a884815fd6ab5e8001d7f32f3246e76179c"
     },
     {
-      "dataset": "hinglish",
-      "lang": "hi",
-      "split": "test",
-      "role": "test",
-      "sentences": 125,
-      "source": "evaluation/hinglish/hinglish_sentences.txt (written by the assistant, 2026-11-18; native-speaker review pending)",
-      "file": "ner_hi/hinglish/hi_test.json",
-      "sha256": "2140b18188c408b29bf1053494d12abf1838308616401e4294e599eb4c6bfdd3"
-    },
-    {
       "dataset": "uner_ru",
       "lang": "ru",
       "split": "test",
@@ -450,6 +440,16 @@
       "source": "https://huggingface.co/datasets/stockmark/ner-wikipedia-dataset/resolve/main/ner.json (CC-BY-SA-3.0)",
       "file": "ner_foreign/stockmark_ja_test.json",
       "sha256": "ff8aa841a171a940ab8ecb3860baf2d740283563bf4ed90075406759991c6216"
+    },
+    {
+      "dataset": "hinglish",
+      "lang": "hi",
+      "split": "test",
+      "role": "test",
+      "sentences": 125,
+      "source": "evaluation/hinglish/hinglish_sentences.txt (written by the assistant, 2026-11-18; reviewed by a Hindi-speaking team member, 2026-11-22)",
+      "file": "ner_hi/hinglish/hi_test.json",
+      "sha256": "0686df3f3564f8669949984938047a26046a82316b77c68000d77b8caaa06417"
     }
   ]
 }

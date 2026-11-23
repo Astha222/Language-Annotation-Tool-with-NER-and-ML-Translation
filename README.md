@@ -125,7 +125,7 @@ What we measured (full tables, method and caveats in [`evaluation/RESULTS.md`](e
   up from 0.65 and 0.53 with the model used before. Person names are found best (about 0.8-0.9), organizations worst (about 0.64-0.73). Dates are not detected (the previous model
   did not detect them either).
 * **Hindi typed in English letters (Hinglish):** recognised by a word-list check (`backend/hinglish.py`) and sent to the Hindi model, which scores 0.94 on 125 sentences written by the project team's assistant
-  (not yet reviewed by a native speaker; the old route scored 0.71). Translation uses Azure's `hi-Latn` source for such text (the offline model and MyMemory cannot read it). Names typed without capital letters are found less well (0.76 on 10 such sentences),
+  and reviewed by a Hindi-speaking team member (one label corrected; the old route scored 0.71). Translation uses Azure's `hi-Latn` source for such text (the offline model and MyMemory cannot read it). Names typed without capital letters are found less well (0.76 on 10 such sentences),
   and a short message with a single Hindi word is not recognised.
 * **Other Indian languages (offered in the app, marked "beta"):** the same open (CC0) model, trained only on Hindi, finds names in Marathi (F1 0.83), Telugu (0.85), Malayalam (0.85),
   Gujarati (0.83), Kannada (0.83), Bengali (0.81), Tamil (0.75) and Punjabi (0.73) on human-labelled news-style test sentences. Odia (0.27) does not work and Assamese (0.50 on only 51 sentences) is uncertain.

@@ -387,7 +387,7 @@ Reading it:
 ### Hinglish: Hindi typed in English letters (2026-11-18)
 
 **Test set** (`evaluation/hinglish/hinglish_sentences.txt`, frozen in `MANIFEST.json` as `hinglish`): 125 sentences, 182 entities (PER/ORG/LOC), 104 with capitalised names, 10 typed in lower case like chat messages, 11 without any entity.
-Written by the assistant, not by native speakers: labels and spelling need review by a Hindi speaker; the sentences are cleaner and more entity-dense than real chat text, so real-world scores will be lower.
+Written by the assistant; **reviewed on 22 Nov 2026 by Aastha Jaiswal (Hindi speaker; her note says the review was prepared with ChatGPT assistance)**: all 125 sentences judged plausible, 1 label changed ("[Karnataka sarkar|ORG]" instead of "[Karnataka|LOC] sarkar"). The table below is the pre-review scoring; after the review (rescored 23 Nov, same predictions): indicbert-hi raw 0.939 [0.907, 0.966] (unchanged), after transliteration 0.896, GLiNER-X base 0.840 / 0.556, Davlan 0.708, English bert-base 0.650; indicbert-hi raw minus Davlan +0.231 [+0.164, +0.294], minus the transliterated route +0.043 [+0.001, +0.089] (now just reliable). Before the review the set had not been checked by a person; the sentences are cleaner and more entity-dense than real chat text, so real-world scores will be lower.
 *Correction:* the first version of the file had no entity markup on the ten lower-case sentences (they were scored as having no entities); that was fixed (164 -> 182 entities) after the first Colab scoring and all numbers below are the rescored ones (`evaluation/rescore_hinglish.py`; the predictions do not depend on the labels).
 
 Strict F1 on the English-letter text (95% bootstrap interval; Colab T4, `ws3e_runs`):
