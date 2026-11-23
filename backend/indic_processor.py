@@ -16,6 +16,13 @@ from indicnlp.normalize.indic_normalize import IndicNormalizerFactory
 from indicnlp.tokenize import indic_detokenize, indic_tokenize
 from indicnlp.transliterate.unicode_transliterate import UnicodeIndicTransliterator
 from sacremoses import MosesDetokenizer, MosesPunctNormalizer, MosesTokenizer
+from indicnlp.normalize.indic_normalize import DevanagariNormalizer
+
+# Bug in indic-nlp-library-itt 0.1.1: DevanagariNormalizer.NUKTA is the six-character text "\\u093C" instead of the nukta sign, so
+# decomposing ऱ, ऩ, ऴ, क़ ... wrote a literal backslash escape into the model input (Marathi "शेतकऱ्यांची" -> "शेतकर\\u093C्यांची", found 2026-11-21).
+NUKTA = "\u093c"
+if DevanagariNormalizer.NUKTA != NUKTA:
+    DevanagariNormalizer.NUKTA = NUKTA
 
 # FLORES-200 language code -> ISO code used by indic-nlp-library
 _FLORES_CODES = {
@@ -143,7 +150,7 @@ class IndicProcessor:
             tokens = self._en_tok.tokenize(self._en_norm.normalize(sent.strip()), escape=False)
             processed = " ".join(tokens)
         else:
-            normed = self._normalizer(iso).normalize(sent.strip())
+            normed = self._normalizer(iso).normalize(sent.strip()).replace("\\u093C", NUKTA)   # belt and braces for the bug above
             processed = " ".join(indic_tokenize.trivial_tokenize(normed, iso))
             if script not in ("Arab", "Aran", "Olck", "Mtei", "Latn"):
                 processed = self._xlit.transliterate(processed, iso, "hi").replace(" ् ", "्")

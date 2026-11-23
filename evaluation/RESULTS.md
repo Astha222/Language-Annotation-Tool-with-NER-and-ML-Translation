@@ -589,6 +589,26 @@ The app's `detect_language()` against langdetect alone, sentence by sentence, on
 
 Reading it: the script rule fixes Odia and Assamese and changes nothing else. **Open problem:** langdetect is unreliable on short English sentences (EWT 76.4%), and on lower-case MultiCoNER text; short English typed with the language set to "auto" can be routed to the multilingual model.
 
+### Offline translation for the Indian languages (M5, 2026-11-23; `evaluation/eval_translation.py`)
+
+English to X, the same 40 WMT24++ segments per language for both providers (random sample, seed 0), chrF++ (sacreBLEU default tokenisation, so not directly comparable with the IndicTrans2 paper's IndicNLP-tokenised numbers). Offline = IndicTrans2 distilled 200M (rotary build, MIT), beam 2, on this laptop's CPU. With 40 segments, differences under about 2-3 points are noise.
+
+| language | offline chrF++ / BLEU | Azure chrF++ / BLEU | offline minus Azure | offline speed (chars/s) |
+|---|---|---|---|---|
+| Hindi | 35.2 / 12.7 | 36.4 / 13.0 | -1.2 | 8 |
+| Marathi | **45.7** / 19.3 | 43.7 / 18.6 | +2.0 | 7 |
+| Bengali | 41.2 / 14.2 | **45.2** / 18.8 | -4.0 | 26 |
+| Gujarati | **53.4** / 29.8 | 45.6 / 22.0 (2 of 40 failed) | +7.8 | 24 |
+| Punjabi | **54.8** / 31.0 | 50.2 / 26.9 | +4.6 | 24 |
+| Tamil | **47.1** / 15.7 | 44.6 / 13.4 | +2.5 | 30 |
+| Telugu | 47.0 / 17.3 | 45.9 / 18.0 | +1.1 | 34 |
+| Kannada | 57.6 / 27.7 | 56.1 / 26.7 | +1.5 | 30 |
+| Malayalam | 46.7 / 15.4 | **49.2** / 16.8 | -2.5 | 24 |
+| Odia, Assamese | available, not measured (WMT24++ has neither) | | | |
+
+Reading it: **offline translation is about as good as Azure for the Indian languages** (better in 6 of 9, clearly worse only for Bengali), so a deployment without an Azure key loses little quality. Azure failed on 2 Gujarati segments (scored as empty), which explains part of that gap. The price is speed: 7-34 characters per second here (the first group ran while only about 0.6 GB of RAM was free; Azure 300-700). A round trip of one sentence through each of the 11 languages (English -> X -> English) returned the meaning intact in every language, including Odia and Assamese.
+**Bug found and fixed on the way:** `indic-nlp-library-itt` 0.1.1 wrote the six characters `\u093C` instead of the nukta sign when normalising ऱ, ऩ, ऴ, क़ ..., so Marathi words such as शेतकऱ्यांची reached the model corrupted (and the Hindi precomposed nukta letters). Patched in `backend/indic_processor.py`, with a test.
+
 ## Caveats
 
 * Small samples: differences under about 0.03 F1 or 2 chrF++ points are noise.

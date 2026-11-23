@@ -30,7 +30,9 @@ import time
 from common import DATA, download, load_backend, use_console_utf8
 
 URL = "https://huggingface.co/datasets/google/wmt24pp/resolve/main/en-{code}.jsonl"
-WMT_CODES = {"hi": "hi_IN", "fr": "fr_FR", "de": "de_DE", "es": "es_MX", "ru": "ru_RU", "zh": "zh_CN", "ar": "ar_SA", "ja": "ja_JP"}
+WMT_CODES = {"hi": "hi_IN", "fr": "fr_FR", "de": "de_DE", "es": "es_MX", "ru": "ru_RU", "zh": "zh_CN", "ar": "ar_SA", "ja": "ja_JP",
+             # Indian languages in WMT24++ (no Odia or Assamese there)
+             "bn": "bn_IN", "gu": "gu_IN", "kn": "kn_IN", "ml": "ml_IN", "mr": "mr_IN", "pa": "pa_IN", "ta": "ta_IN", "te": "te_IN"}
 BLEU_TOKENIZER = {"zh": "zh", "ja": "char"}
 LABELS = {"azure": "Azure Translator", "local": "Local open-source models", "google": "Google (unofficial)", "mymemory": "MyMemory"}
 

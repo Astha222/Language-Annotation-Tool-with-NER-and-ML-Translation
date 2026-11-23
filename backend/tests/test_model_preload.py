@@ -345,11 +345,12 @@ def test_nine_indian_languages_share_the_open_model_and_two_are_left_out(main_mo
 
 def test_translation_error_says_what_to_do_when_azure_is_missing(main_module, monkeypatch):
     monkeypatch.setattr(main_module, "_azure_ready", lambda: False)
-    msg = main_module._no_provider_message("en", "bn")
+    msg = main_module._no_provider_message("en", "ko")                     # Korean: no offline model
     assert "Offline translation is not available" in msg and "Azure" in msg
     assert "Offline translation is not available" not in main_module._no_provider_message("en", "fr")      # offline French exists
+    assert "Offline translation is not available" not in main_module._no_provider_message("en", "bn")      # offline Bengali exists (IndicTrans2)
     monkeypatch.setattr(main_module, "_azure_ready", lambda: True)
-    assert "Offline translation is not available" not in main_module._no_provider_message("en", "bn")
+    assert "Offline translation is not available" not in main_module._no_provider_message("en", "ko")
 
 
 def test_translating_into_an_unsupported_language_gives_a_clear_502(main_module, monkeypatch):
@@ -358,7 +359,7 @@ def test_translating_into_an_unsupported_language_gives_a_clear_502(main_module,
     monkeypatch.setattr(main_module, "_azure_ready", lambda: False)
     monkeypatch.setenv("TRANSLATION_PROVIDERS", "azure,local")
     with pytest.raises(HTTPException) as e:
-        main_module.perform_translation("en", "bn", "Hello world.")
+        main_module.perform_translation("en", "ko", "Hello world.")      # Korean: no offline model (Bengali now has one)
     assert e.value.status_code == 502 and "Azure" in e.value.detail
 
 

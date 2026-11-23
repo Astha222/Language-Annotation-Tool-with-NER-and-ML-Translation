@@ -8,8 +8,9 @@ class FakeEngine:
     def __init__(self):
         self.batches = []
 
-    def translate_batch(self, texts, beams):
+    def translate_batch(self, texts, beams, src=None, tgt=None):
         self.batches.append(list(texts))
+        self.pairs = getattr(self, "pairs", []) + [(src, tgt)]
         return ["T(" + t + ")" for t in texts]
 
 
@@ -42,7 +43,7 @@ def test_unsupported_pair_raises(fake_engine):
 
 
 def test_indictrans_models_are_pinned_to_exact_revisions():
-    for repo, rev, src_tag, tgt_tag in lt.INDICTRANS.values():
+    for repo, rev in lt.INDICTRANS.values():
         assert len(rev) == 40 and set(rev) <= set("0123456789abcdef")          # a commit hash, not a moving branch
         assert repo.startswith("prajdabre/rotary-indictrans2-")
 
@@ -72,6 +73,46 @@ def test_indictrans_can_be_switched_off(monkeypatch):
     lt._engine("en", "hi")
     lt._engines.clear()
     assert built == ["marian", "indictrans"]
+
+
+INDIAN = ("hi", "mr", "bn", "as", "or", "pa", "gu", "ta", "te", "kn", "ml")
+
+
+def test_all_eleven_indian_languages_translate_offline_in_both_directions():
+    for lang in INDIAN:
+        assert lt.supports("en", lang) and lt.supports(lang, "en"), lang
+    assert lt.supports("ta", "or") and lt.supports("ml", "fr")          # pivoted through English
+
+
+def test_every_indian_language_shares_one_model_per_direction(monkeypatch):
+    built = []
+
+    class Spy:
+        def __init__(self, kind, src, tgt):
+            built.append((kind, src, tgt))
+
+    monkeypatch.setattr(lt, "_Engine", Spy)
+    monkeypatch.setenv("LOCAL_INDICTRANS", "1")
+    lt._engines.clear()
+    for lang in INDIAN:
+        lt._engine("en", lang)
+        lt._engine(lang, "en")
+    lt._engines.clear()
+    assert built == [("indictrans", "en", "indic"), ("indictrans", "indic", "en")]
+
+
+def test_the_language_tag_reaches_the_model(fake_engine):
+    lt.translate("en", "ta", "Chennai is in Tamil Nadu.")
+    lt.translate("or", "en", "ଭୁବନେଶ୍ୱର")
+    assert fake_engine.pairs == [("en", "ta"), ("or", "en")]
+    assert lt._tag("or") == "ory_Orya" and lt._tag("as") == "asm_Beng" and lt._tag("en") == "eng_Latn"
+
+
+def test_without_indictrans_only_hindi_stays_offline(monkeypatch):
+    monkeypatch.setenv("LOCAL_INDICTRANS", "0")
+    assert lt.supports("en", "hi") and not lt.supports("en", "mr") and not lt.supports("ta", "en")
+    with pytest.raises(lt.LocalTranslationError):
+        lt._engine("en", "mr")
 
 
 def test_loaded_models_are_limited_to_save_memory(monkeypatch):

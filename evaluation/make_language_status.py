@@ -37,7 +37,15 @@ MODELS = {
 # the app uses these today: one open model for nine languages (Odia and Assamese are not offered: 0.27 and a 51-sentence test)
 OFFERED = {l: "indicbert_hi" for l in ("hi", "mr", "bn", "ta", "te", "gu", "kn", "ml", "pa")}
 NATIVE_TEST = {}                                  # language -> True once a test made by native speakers exists (none yet)
-TRANSLATION = {"hi": {"status": "beta", "note": "offline IndicTrans2 scored chrF++ 35.2 against Azure's 36.0 on 40 WMT24++ segments (a small sample)"}}
+# Offline IndicTrans2 (distilled 200M, English -> X) against Azure on the same 40 WMT24++ segments per language, chrF++ (2026-11-23; a small sample:
+# differences under about 2-3 points are noise). No agreed thresholds for translation yet, so the status is "beta" wherever it was measured.
+_MT = {"hi": (35.2, 36.4), "mr": (45.7, 43.7), "bn": (41.2, 45.2), "gu": (53.4, 45.6), "pa": (54.8, 50.2),
+       "ta": (47.1, 44.6), "te": (47.0, 45.9), "kn": (57.6, 56.1), "ml": (46.7, 49.2)}
+TRANSLATION = {l: {"status": "beta", "note": f"offline IndicTrans2 chrF++ {o} against Azure's {a} on 40 WMT24++ segments (English to {l}; a small sample)"}
+               for l, (o, a) in _MT.items()}
+TRANSLATION["gu"]["note"] += "; Azure failed on 2 of the 40 segments, which lowers its score"
+for _l in ("or", "as"):
+    TRANSLATION[_l] = {"status": "not_evaluated", "note": "offline IndicTrans2 available; not measured (WMT24++ has no Odia or Assamese)"}
 AZURE_TESTED = {"hi", "mr", "bn", "ta", "te", "gu", "kn", "ml", "pa", "or", "as"}      # a test sentence was translated correctly on 2026-11-17
 
 

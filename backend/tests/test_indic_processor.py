@@ -46,6 +46,23 @@ def test_english_postprocess_detokenizes(proc):
     assert proc.postprocess_batch(["Hello , world !"], "eng_Latn", [{}])[0] == "Hello, world!"
 
 
+def test_precomposed_nukta_letters_do_not_leak_a_backslash_escape(proc):
+    # indic-nlp-library-itt 0.1.1 wrote the six characters "़" (backslash, u, 0, 9, 3, C) instead of the nukta sign when
+    # decomposing letters such as ऱ (U+0931, very common in Marathi) or क़ (U+0958)
+    for text, lang in (("शेतकऱ्यांची भेट", "mar_Deva"), ("क़िला", "hin_Deva"), ("दुसऱ्या दिवशी", "mar_Deva")):
+        out = proc.preprocess_batch([text], lang, "eng_Latn")[0][0]
+        assert "\\" not in out, out
+        assert "़" in out, out          # the real nukta sign is there instead
+
+
+def test_every_offered_indian_script_is_preprocessed_with_its_tags(proc):
+    samples = {"ben_Beng": "কলকাতা", "asm_Beng": "গুৱাহাটী", "ory_Orya": "ଭୁବନେଶ୍ୱର", "pan_Guru": "ਅੰਮ੍ਰਿਤਸਰ", "guj_Gujr": "અમદાવાદ",
+               "tam_Taml": "சென்னை", "tel_Telu": "హైదరాబాద్", "kan_Knda": "ಬೆಂಗಳೂರು", "mal_Mlym": "കൊച്ചി", "mar_Deva": "मुंबई", "hin_Deva": "दिल्ली"}
+    for tag, word in samples.items():
+        out = proc.preprocess_batch([word], tag, "eng_Latn")[0][0]
+        assert out.startswith(f"{tag} eng_Latn ") and len(out.split()) >= 3 and "\\" not in out, (tag, out)
+
+
 def test_hindi_path_runs_end_to_end(proc):
     pre, maps = proc.preprocess_batch(["नरेंद्र मोदी नई दिल्ली में हैं।"], "hin_Deva", "eng_Latn")
     assert pre[0].startswith("hin_Deva eng_Latn ")
