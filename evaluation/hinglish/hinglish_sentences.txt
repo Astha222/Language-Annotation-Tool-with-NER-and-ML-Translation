@@ -1,6 +1,7 @@
 # Hinglish (Hindi written in English letters) NER test set. One sentence per line; punctuation is a separate word; entities are [text|TYPE] with TYPE = PER, ORG or LOC.
 # DRAFTED BY THE ASSISTANT (2026-11-18), NOT by native speakers: the sentences are invented but written the way people type on WhatsApp / Twitter / in emails, with mixed spellings.
-# They must be reviewed by a Hindi speaker before any number from this set is quoted as final (see IMPROVEMENT_LOG.md, "Hinglish").
+# Reviewed on 2026-11-22 by Aastha Jaiswal (Hindi speaker; her note says the review was prepared with ChatGPT assistance): all 125 sentences
+# judged plausible; 1 line changed ("Karnataka sarkar" = the state government, ORG). See IMPROVEMENT_LOG.md, 2026-11-23, "T4".
 # Lines starting with # are ignored. Test use only: never train on it.
 [Rahul|PER] kal [Mumbai|LOC] ja raha hai meeting ke liye .
 [Priya|PER] ne mujhe bataya ki [Delhi|LOC] mein bahut garmi hai .
@@ -109,7 +110,7 @@ Dr. [Sharma|PER] ka appointment [Apollo|ORG] hospital mein hai .
 [Dev|PER] [Dehradun|LOC] mein padhai kar raha hai .
 [Tamil Nadu|LOC] ke [Chennai|LOC] mein naya airport banega .
 [Honda|ORG] ki bike bahut mileage deti hai .
-[Karnataka|LOC] sarkar ne naya budget pesh kiya .
+[Karnataka sarkar|ORG] ne naya budget pesh kiya .
 mere dost [Farhan|PER] ne [Dubai|LOC] mein flat liya hai .
 [Shreya Ghoshal|PER] ka concert [Indore|LOC] mein hoga .
 [Yes Bank|ORG] ke customer bahut pareshan hain .

@@ -48,7 +48,7 @@ def hinglish_entry():
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text("".join(json.dumps(r, ensure_ascii=False) + chr(10) for r in rows), encoding="utf-8")
     return {"dataset": "hinglish", "lang": "hi", "split": "test", "role": "test", "sentences": len(rows),
-            "source": "evaluation/hinglish/hinglish_sentences.txt (written by the assistant, 2026-11-18; native-speaker review pending)",
+            "source": "evaluation/hinglish/hinglish_sentences.txt (written by the assistant, 2026-11-18; reviewed by a Hindi-speaking team member, 2026-11-22)",
             "file": "ner_hi/hinglish/hi_test.json", "sha256": sha256(OUT)}
 
 
