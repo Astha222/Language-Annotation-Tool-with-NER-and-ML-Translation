@@ -53,7 +53,7 @@ It is useful for creating **NLP datasets**, studying **multilingual text** and b
 | API | FastAPI, Uvicorn, Pydantic v2 |
 | Persistence | SQLAlchemy (PostgreSQL, or SQLite for trying it out) and MongoDB (pymongo) |
 | Auth | JWT (python-jose) with bcrypt password hashes |
-| NER | Hugging Face `transformers` token-classification pipelines: the B-noFIN student (English, falls back to `dslim/bert-base-NER`), `neuronsbyisshu/indicbert-hi-ner-naamapadam` (Hindi), `Davlan/xlm-roberta-base-wikiann-ner` (other languages) |
+| NER | Hugging Face `transformers` token-classification pipelines: the B-noFIN student (English, falls back to `dslim/bert-base-NER`), `neuronsbyisshu/indicbert-hi-ner-naamapadam` (Hindi), `Davlan/xlm-roberta-base-ner-hrl` (other languages) |
 | Offline translation | IndicTrans2 "rotary" 200M models (Hindi <-> English) and Helsinki-NLP OPUS-MT Marian models (other pairs) |
 | Cloud translation (optional) | Azure AI Translator; unofficial Google endpoint and MyMemory are opt-in |
 | Documents | pypdf, python-docx, openpyxl, python-pptx, plus the standard library for CSV, HTML, XML, OpenDocument |
@@ -115,7 +115,7 @@ logged-in user; another user's ids return 404.
 
 ### 5.3 Entity recognition (`run_ner`)
 1. Choose the model from the source language: English -> the B-noFIN student (PER, ORG, LOC, MISC; the model for each language comes from the registry `backend/ner_models.json`, see `ner_registry.py`); everything else
-   -> `neuronsbyisshu/indicbert-hi-ner-naamapadam` for Hindi and eight other Indian languages (`INDIC_NER_LANGS` in `main.py`; PER, ORG, LOC; `NER_MODEL_HI` overrides it) and `Davlan/xlm-roberta-base-wikiann-ner` (PER, ORG, LOC; its output head has a DATE label but it almost never predicts it)
+   -> `neuronsbyisshu/indicbert-hi-ner-naamapadam` for Hindi and eight other Indian languages (`INDIC_NER_LANGS` in `main.py`; PER, ORG, LOC; `NER_MODEL_HI` overrides it) and `Davlan/xlm-roberta-base-ner-hrl` (PER, ORG, LOC; its output head has a DATE label but dates were not seen in a small check; the model for each language comes from the registry, and `otter_ner.py` runs the optional Otter model)
    for every other language. Aggregation strategy `first` keeps whole words.
 2. Split the text into sentence-aware chunks of at most 800 characters (the models read 512 tokens) and run them in batches.
 3. `_clean_entities` post-processes every entity: it uses the exact text from the input, trims edge punctuation,

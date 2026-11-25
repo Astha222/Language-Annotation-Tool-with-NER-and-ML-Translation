@@ -256,9 +256,12 @@ def test_english_default_is_the_b_nofin_student_with_bert_base_as_fallback(main_
     assert main_module._NER_REGISTRY.fallback_of(main_module.NER_MODEL_EN) == "dslim/bert-base-NER"
 
 
-def test_the_other_defaults_did_not_change(main_module):
-    assert main_module.NER_MODEL_MULTI == "Davlan/xlm-roberta-base-wikiann-ner"           # not switched: decision D2 is the mentor's
-    assert main_module.NER_MODEL_HI == "neuronsbyisshu/indicbert-hi-ner-naamapadam"
+def test_multilingual_default_is_the_open_licence_hrl_model(main_module):
+    """Decision D2(a) (2026-11-25): the model without a declared licence is no longer a default."""
+    assert main_module.NER_MODEL_MULTI == "Davlan/xlm-roberta-base-ner-hrl"
+    for lang in ("fr", "es", "de", "ru", "zh", "ar", "ja"):
+        assert main_module.ner_model_name(lang) == "Davlan/xlm-roberta-base-ner-hrl"
+    assert main_module.NER_MODEL_HI == "neuronsbyisshu/indicbert-hi-ner-naamapadam"       # the Indian-language model did not change
 
 
 # ── Hindi NER model ──────────────────────────────────────────────────────
