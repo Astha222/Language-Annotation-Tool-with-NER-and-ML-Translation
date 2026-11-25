@@ -8,7 +8,9 @@ The bundled list is backend/ner_models.json. Optional changes, in this order (la
 Optional fields of a model entry: "fallback" (another entry or source, used if this one cannot be loaded); "revision" (a Hugging Face commit to pin);
 "trust_remote_code": true (the model runs Python code that lives in its repository; ONLY allowed together with a "revision" that is a full 40-character commit hash,
 so a later push to the model's page cannot change what runs; a deployment can refuse all such models with NER_ALLOW_REMOTE_CODE=0);
-"loader": "otter" (a zero-shot model that is not a normal token-classification model, see otter_ner.py) and its "threshold".
+"loader": "otter" (a zero-shot model that is not a normal token-classification model, see otter_ner.py) and its "threshold";
+"onnx_dir" and "onnx_file" (an ONNX export of THIS model, made with export_onnx_ner.py; used for it in every language it serves; if the file is missing or
+cannot be loaded the model is loaded the normal way). The old NER_ONNX_DIR setting is the same thing for English only, without knowing which model it belongs to.
 A model that is only given by NER_MODEL_* as an id or folder, and is not in the registry, never gets remote code.
 
 Route keys: a language code ("en", "fr", ...) is that language only; "indic" is the group of Indian languages (INDIC_NER_LANGS in main.py);
@@ -50,6 +52,10 @@ class Registry:
             if loader == "otter" and entry.get("trust_remote_code") is not True:
                 raise ValueError(f"NER model registry: model '{name}' uses the otter loader, which runs code from the model's repository: "
                                  f"set \"trust_remote_code\": true to confirm that this is wanted")
+            if "onnx_dir" in entry and not str(entry["onnx_dir"]).strip():
+                raise ValueError(f"NER model registry: model '{name}': 'onnx_dir' must not be empty")
+            if "onnx_file" in entry and not str(entry["onnx_file"]).endswith(".onnx"):
+                raise ValueError(f"NER model registry: model '{name}': 'onnx_file' must be the name of a .onnx file")
             if entry.get("trust_remote_code") and not _COMMIT.match(str(entry.get("revision", ""))):
                 raise ValueError(f"NER model registry: model '{name}' runs remote code, so it needs a \"revision\" that is a full 40-character commit hash "
                                  f"(the commit that was reviewed), never a branch name")
@@ -77,8 +83,9 @@ class Registry:
         return {k: self.source(v) for k, v in self.routes.items() if k not in GROUPS}
 
     def options_for(self, source: str) -> dict:
-        """The registry entry whose source is `source` (loader, revision, trust_remote_code, threshold ...); {} for a model that is not in the registry."""
-        for entry in self.models.values():
+        """The registry entry whose source is `source` (loader, revision, trust_remote_code, threshold, onnx_dir ...); {} for a model that is not in the registry.
+        If several entries share a source, the LAST one wins, so an entry in your own NER_MODELS_FILE overrides the bundled one."""
+        for entry in reversed(list(self.models.values())):
             if str(entry["source"]).strip() == source:
                 return entry
         return {}
@@ -91,11 +98,11 @@ class Registry:
 
     def fallback_of(self, source: str) -> Optional[str]:
         """The source to use when `source` cannot be loaded, or None."""
-        for name, entry in self.models.items():
-            if str(entry["source"]).strip() == source and str(entry.get("fallback", "")).strip():
-                fb = self.source(entry["fallback"])
-                return fb if fb != source else None
-        return None
+        fallback = str(self.options_for(source).get("fallback", "")).strip()
+        if not fallback:
+            return None
+        fb = self.source(fallback)
+        return fb if fb != source else None
 
     def describe(self, indic_langs=()) -> list:
         """One row per route, for GET /health/models and the command line."""
@@ -103,7 +110,7 @@ class Registry:
         for key, ref in self.routes.items():
             e = self.entry(ref)
             rows.append({"route": key, "model": e["name"], "source": self.source(ref), "licence": e.get("licence"),
-                         "fallback": self.fallback_of(self.source(ref)),
+                         "fallback": self.fallback_of(self.source(ref)), "onnx_dir": e.get("onnx_dir"),
                          "languages": sorted(indic_langs) if key == "indic" else None})
         return rows
 

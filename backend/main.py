@@ -734,14 +734,57 @@ def _evict_ner_models():
         gc.collect()                    # a request still using a dropped model keeps its own reference until it finishes
         logger.info(f"NER memory limit ({limit} models): unloaded {', '.join(dropped)}")
 
+# ONNX build of a model (export_onnx_ner.py; model.onnx = fp32, identical output, model_int8.onnx = INT8, smaller, lost accuracy on one test set).
+# A model gets one through its registry entry ("onnx_dir", "onnx_file"), in every language it serves. The old NER_ONNX_DIR setting still works for English
+# only. An export is only ever used for the model it was made from: export_onnx_ner.py records that in export_info.json, and a different model is refused.
+_ner_onnx_used: dict = {}           # model source -> (folder, file) of the ONNX build it was loaded from; reported by /health/models, part of the cache key
+
+def _onnx_export_source(folder: Path) -> Optional[str]:
+    """The model an ONNX folder was exported from, from export_info.json; None for folders made before that file existed."""
+    try:
+        return str(json.loads((folder / "export_info.json").read_text(encoding="utf-8")).get("source") or "") or None
+    except (OSError, ValueError):
+        return None
+
+def _onnx_choice(model: str, lang: str):
+    """(folder, file, where it was configured) of the ONNX build to use for `model`, or None to use the normal PyTorch model."""
+    entry = _NER_REGISTRY.options_for(model)
+    if entry.get("onnx_dir"):
+        folder = Path(entry["onnx_dir"])
+        if not folder.is_absolute():
+            folder = Path(__file__).resolve().parent / folder
+        file, where = str(entry.get("onnx_file") or "model.onnx"), "the registry"
+    elif lang == "en" and os.getenv("NER_ONNX_DIR", "").strip():
+        folder, file, where = Path(os.environ["NER_ONNX_DIR"].strip()), os.getenv("NER_ONNX_FILE", "model_int8.onnx").strip(), "NER_ONNX_DIR"
+    else:
+        return None
+    if not (folder / file).exists():
+        logger.warning(f"ONNX file {folder / file} (from {where}) does not exist: using the normal {model} model instead.")
+        return None
+    made_from = _onnx_export_source(folder)
+    if made_from and made_from != model:
+        logger.warning(f"ONNX folder {folder} was exported from {made_from}, not from {model}: NOT used (it would give another model's results). "
+                       f"Export {model} again with export_onnx_ner.py.")
+        return None
+    if where == "NER_ONNX_DIR":
+        logger.warning(f"NER_ONNX_DIR is the old way to choose an ONNX build and does not say which model it belongs to"
+                       f"{'' if made_from else ' (this folder has no export_info.json, so it cannot be checked)'}. "
+                       f"Put \"onnx_dir\" / \"onnx_file\" on the model's entry in ner_models.json instead; if you changed the English model, export it again.")
+    return folder, file, where
+
 def _load_ner_pipeline(model: str, lang: str):
-    onnx_dir = os.getenv("NER_ONNX_DIR", "").strip()
-    onnx_file = os.getenv("NER_ONNX_FILE", "model_int8.onnx").strip()
-    if lang == "en" and onnx_dir and Path(onnx_dir, onnx_file).exists():
-        # exported with export_onnx_ner.py (model.onnx = fp32, model_int8.onnx = INT8)
-        import onnx_ner
-        logger.info(f"Loading ONNX NER model {onnx_dir}/{onnx_file} …")
-        return onnx_ner.load_pipeline(onnx_dir, file=onnx_file, threads=os.getenv("TORCH_THREADS") or None)
+    _ner_onnx_used.pop(model, None)
+    choice = _onnx_choice(model, lang)
+    if choice:
+        folder, file, where = choice
+        try:
+            import onnx_ner
+            logger.info(f"Loading ONNX NER model {folder}/{file} (from {where}) …")
+            nlp = onnx_ner.load_pipeline(str(folder), file=file, threads=os.getenv("TORCH_THREADS") or None)
+            _ner_onnx_used[model] = (str(folder), file)
+            return nlp
+        except Exception as e:                           # onnxruntime missing, damaged file ...: the normal model still works, just slower
+            logger.warning(f"ONNX build {folder}/{file} could not be loaded ({type(e).__name__}: {str(e)[:200]}): using the normal {model} model instead.")
     logger.info(f"Loading NER model {model} …")
     entry = _NER_REGISTRY.options_for(model)
     if entry.get("loader") == "otter":
@@ -822,8 +865,8 @@ def run_ner(text: str, lang: str, progress=None, cancelled=None, batch_size: Opt
     extra  = {"stride": stride} if stride else {}
     if lang in NO_SPACE_LANGS:
         extra["aggregation_strategy"] = "simple"
-    model_id = "|".join([effective_ner_model(lang), os.getenv("NER_ONNX_DIR", "") if lang == "en" else "",
-                         os.getenv("NER_ONNX_FILE", "") if lang == "en" else "", str(stride)])
+    onnx_dir, onnx_file = _ner_onnx_used.get(effective_ner_model(lang), ("", ""))     # the INT8 build gives different results from fp32 or PyTorch
+    model_id = "|".join([effective_ner_model(lang), onnx_dir, onnx_file, str(stride)])
     tag = _NER_REGISTRY.variant_tag(effective_ner_model(lang))       # pinned commit / threshold: a different setting must not reuse cached results
     if tag:
         model_id += "|" + tag
@@ -984,6 +1027,7 @@ def health_models():
             "ner_loaded": list(_ner_pipelines),               # least recently used first
             "ner_max_models": _ner_max_models(),
             "ner_routes": _NER_REGISTRY.describe(INDIC_NER_LANGS),   # which model each language uses (from ner_models.json + settings)
+            "ner_onnx": {k: "/".join(v) for k, v in _ner_onnx_used.items() if k in _ner_pipelines},   # loaded models that run from an ONNX build
             "ner_fallbacks": dict(_ner_fallbacks),                   # primary -> fallback, only while a primary could not be loaded
             "translation_loaded": local_translator.loaded_engines()}
 
