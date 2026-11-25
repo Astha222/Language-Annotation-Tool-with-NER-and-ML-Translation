@@ -29,6 +29,7 @@ os.environ.update({
     "CORS_ORIGINS": "http://localhost:8081",
     "PRELOAD_MODELS": "none",              # tests must never load a real model at startup
     "RESULT_CACHE_PATH": "off",            # tests must not read or write a real cache file
+    "NER_MODEL_EN": "", "NER_MODEL_HI": "", "NER_MODEL_MULTI": "", "NER_MODELS_FILE": "",   # tests check the bundled model registry, not a developer's overrides
 })
 
 import pytest  # noqa: E402
