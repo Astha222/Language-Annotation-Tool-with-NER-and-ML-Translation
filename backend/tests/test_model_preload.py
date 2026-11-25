@@ -250,21 +250,15 @@ def test_enough_disk_is_not_flagged_and_health_reports_it(client, main_module, m
     assert body["disk"]["free_gb"] == 50.0 and body["disk"]["low"] is False
 
 
-def test_english_ner_model_can_be_chosen_by_setting(main_module, monkeypatch):
-    monkeypatch.delenv("NER_MODEL_EN", raising=False)
-    assert main_module._default_ner_model() == "dslim/bert-base-NER"
-    monkeypatch.setenv("NER_MODEL_EN", "  C:/models/student/best ")
-    assert main_module._default_ner_model() == "C:/models/student/best"
-    monkeypatch.setenv("NER_MODEL_EN", "   ")
-    assert main_module._default_ner_model() == "dslim/bert-base-NER"
+def test_english_default_is_the_b_nofin_student_with_bert_base_as_fallback(main_module):
+    """Decision D1 (2026-11-25): the English default is B-noFIN; if its weights cannot be loaded the previous model answers."""
+    assert main_module.NER_MODEL_EN == "muskan-424/distilroberta-ner-english-b-nofin"
+    assert main_module._NER_REGISTRY.fallback_of(main_module.NER_MODEL_EN) == "dslim/bert-base-NER"
 
 
-def test_multilingual_ner_model_can_be_chosen_by_setting_and_defaults_to_the_old_model(main_module, monkeypatch):
-    assert main_module.NER_MODEL_MULTI == "Davlan/xlm-roberta-base-wikiann-ner"           # not switched: the owner decides
-    monkeypatch.setenv("NER_MODEL_MULTI", " Davlan/xlm-roberta-base-ner-hrl ")
-    assert main_module._env_model("NER_MODEL_MULTI", "x") == "Davlan/xlm-roberta-base-ner-hrl"
-    monkeypatch.setenv("NER_MODEL_MULTI", "  ")
-    assert main_module._env_model("NER_MODEL_MULTI", "x") == "x"
+def test_the_other_defaults_did_not_change(main_module):
+    assert main_module.NER_MODEL_MULTI == "Davlan/xlm-roberta-base-wikiann-ner"           # not switched: decision D2 is the mentor's
+    assert main_module.NER_MODEL_HI == "neuronsbyisshu/indicbert-hi-ner-naamapadam"
 
 
 # ── Hindi NER model ──────────────────────────────────────────────────────

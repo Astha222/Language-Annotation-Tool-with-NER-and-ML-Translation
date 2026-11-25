@@ -15,7 +15,7 @@ private history, and export everything.
 ## Contents
 
 [Features](#features) · [Requirements](#requirements) · [Quick start](#quick-start) · [Configuration](#configuration) ·
-[Translation providers](#translation-providers) · [Documents](#documents) · [Accuracy](#accuracy) · [Project layout](#project-layout) ·
+[Changing or adding an NER model](#changing-or-adding-an-ner-model) · [Translation providers](#translation-providers) · [Documents](#documents) · [Accuracy](#accuracy) · [Project layout](#project-layout) ·
 [Development](#development) · [Known limitations](#known-limitations) · [License](#license)
 
 ## Features
@@ -78,6 +78,40 @@ Everything is set in `backend/.env`; [`backend/.env.example`](backend/.env.examp
 
 Check which translators work from your machine: `cd backend && python check_translation.py`.
 
+## Changing or adding an NER model
+
+Which entity-recognition model each language uses is **data, not code**: it is listed in [`backend/ner_models.json`](backend/ner_models.json)
+(`models` = what is available, with licence and measured accuracy; `routes` = which model each language uses). Today:
+
+| Route | Languages | Model | Licence |
+|---|---|---|---|
+| `en` | English | `english-b-nofin` (a distilroberta-base student, decision D1); falls back to `english-bert-base` if its weights cannot be loaded | Apache-2.0 base; see THIRD_PARTY_NOTICES |
+| `indic` | Hindi and eight other Indian languages | `indic-indicbert-hi` | CC0-1.0 |
+| `*` | every other language | `multi-davlan-wikiann` (`multi-davlan-hrl` is the open-licence candidate) | none declared (decision D2) |
+
+See what the running server uses with `GET /health/models` (`ner_routes`, `ner_fallbacks`), or without starting it: `python backend/ner_registry.py`.
+
+**Switch a default** (the first two need no code change):
+
+1. In `backend/.env`: `NER_MODEL_EN=english-bert-base` (or `NER_MODEL_HI`, `NER_MODEL_MULTI`). The value can be a name from the registry,
+   a Hugging Face model id, or a local folder.
+2. For one language, or to keep your choices in your own file: write a file shaped like `ner_models.json` and set `NER_MODELS_FILE=<that file>` in `.env`.
+   Its `models` are added to the bundled ones and its `routes` replace the bundled ones, for example `{"routes": {"fr": "my-french-model"}}` sends only French to another model.
+3. Edit `routes` in `backend/ner_models.json` itself (changes the default for everyone).
+
+**Add a model you fine-tuned** (a Hugging Face token-classification model with PER/ORG/LOC labels, optionally MISC):
+
+1. Train it (for example with `training/distill.py`) and keep the `best` folder, or upload it to the Hugging Face Hub.
+2. Measure it on the frozen test sets before it becomes a default, for example
+   `python evaluation/run_all.py --models "mymodel=<folder or id>" --datasets wnut2017,btc,uner_en_ewt --full`, and compare with the model it would replace in `evaluation/RESULTS.md`.
+3. Add it under `models` (`source` = the folder or id, plus `licence`, `evidence` and an optional `fallback`), then point a route at it (see above). Restart the backend.
+4. Record the licence of the weights and of the training data in `THIRD_PARTY_NOTICES.md`.
+
+If a model cannot be loaded (folder missing, repository not found, no internet) and it has a `fallback`, the app logs a warning, uses the fallback and shows it in
+`/health/models`; without a `fallback` the request fails with the error. Cached entity results are keyed by the model that really answered, so switching
+models never shows another model's old results. Each loaded model takes about 1 GB of memory; `NER_MAX_MODELS` (default 2) limits how many stay loaded.
+`NER_ONNX_DIR` (English only) is an export of ONE specific model: when you change the English model, export the new one again or unset `NER_ONNX_DIR`.
+
 ## Translation providers
 
 `TRANSLATION_PROVIDERS` is an ordered list; the first provider that works translates each piece of text, and a provider
@@ -118,8 +152,10 @@ What we measured (full tables, method and caveats in [`evaluation/RESULTS.md`](e
 * **Offline translation for the Indian languages (English to X, chrF++ on 40 WMT24++ segments each):** IndicTrans2 is about as good as Azure:
   better for Marathi, Gujarati, Punjabi, Tamil, Telugu and Kannada (+1 to +8), slightly worse for Hindi and Malayalam (-1 to -3) and Bengali (-4).
   It is much slower on a laptop CPU (7-34 characters per second). Odia and Assamese work but are not measured.
-* **English entity recognition (F1):** about 0.56-0.61 on Wikipedia text, 0.49 on noisy social media (full WNUT-2017 test set), 0.40 on Twitter and
-  0.18 on financial text with the default model. Informal and financial text are hard: on Twitter most names are missed, on financial text many get the wrong type.
+* **English entity recognition (strict F1):** the default is the B-noFIN student, a small model trained on news, WNUT-2017 and BTC text. Over three training runs it scores 0.762 +- 0.009 on English-EWT
+  (text it was not trained on), against 0.703 for the previous default `dslim/bert-base-NER`; names only: 0.59 on WNUT-2017 and 0.79 on BTC; 0.19 on financial text, which it was not trained on.
+  The figures that follow are for the previous default: about 0.56-0.61 on Wikipedia text, 0.49 on noisy social media (full WNUT-2017 test set), 0.40 on Twitter and
+  0.18 on financial text. Informal and financial text are hard: on Twitter most names are missed, on financial text many get the wrong type.
   Larger candidate models score 0.02-0.19 higher but are slower.
 * **Hindi entity recognition (strict F1):** 0.83 on 864 human-labelled Hindi sentences (Naamapadam) and 0.76 on 3,094 sentences of a second dataset (HiNER),
   up from 0.65 and 0.53 with the model used before. Person names are found best (about 0.8-0.9), organizations worst (about 0.64-0.73). Dates are not detected (the previous model
@@ -179,5 +215,5 @@ an accuracy change before proposing it.
 ## Acknowledgements
 
 IndicTrans2 and IndicTransToolkit (AI4Bharat, Varun Gumma), the rotary IndicTrans2 models (Gumma, Chitale, Bali),
-Helsinki-NLP OPUS-MT, `dslim/bert-base-NER`, `neuronsbyisshu/indicbert-hi-ner-naamapadam`, `Davlan/xlm-roberta-base-wikiann-ner`, Hugging Face Transformers, FastAPI,
+Helsinki-NLP OPUS-MT, `dslim/bert-base-NER`, B-noFIN (distilroberta-base), `neuronsbyisshu/indicbert-hi-ner-naamapadam`, `Davlan/xlm-roberta-base-wikiann-ner`, Hugging Face Transformers, FastAPI,
 Expo / React Native, and the benchmark authors listed in `THIRD_PARTY_NOTICES.md`.

@@ -639,24 +639,21 @@ logger.info("Translation providers (in order): " + ", ".join(
 # -------------------------------------------------------
 _ner_pipelines: dict = {}
 
-# English: dslim/bert-base-NER (PER/ORG/LOC/MISC).
-# Hindi: neuronsbyisshu/indicbert-hi-ner-naamapadam (CC0, PER/ORG/LOC; strict F1 0.827 on the Naamapadam gold test and 0.755 on HiNER
-# against 0.650 and 0.527 for the previous model; it does not tag dates).
-# Every other language: multilingual XLM-R fine-tuned on WikiANN (PER/ORG/LOC; no declared licence). Its head has a DATE label, but it predicted 0 dates
-# on 4,472 Hindi sentences and 2 on 2,737 German/Spanish/French sentences, so dates are effectively not detected for any language.
-def _default_ner_model() -> str:
-    """NER_MODEL_EN may name a Hugging Face model id or a local folder (for example a distilled student); default: bert-base-NER."""
-    return os.getenv("NER_MODEL_EN", "").strip() or "dslim/bert-base-NER"
+# Which model each language uses is NOT hard-coded here: it comes from the model registry (backend/ner_models.json, see ner_registry.py and
+# "Changing or adding an NER model" in README.md). Today:
+#   English: the B-noFIN student (distilroberta-base, PER/ORG/LOC/MISC), decision D1; falls back to dslim/bert-base-NER if its weights cannot be loaded.
+#   Hindi and eight other Indian languages: neuronsbyisshu/indicbert-hi-ner-naamapadam (CC0, PER/ORG/LOC).
+#   Every other language: multilingual XLM-R fine-tuned on WikiANN (PER/ORG/LOC; no declared licence, decision D2). Its head has a DATE label, but it predicted
+#   0 dates on 4,472 Hindi sentences and 2 on 2,737 German/Spanish/French sentences, so dates are effectively not detected for any language.
+# NER_MODEL_EN / NER_MODEL_HI / NER_MODEL_MULTI (a registry name, a Hugging Face id or a local folder) still work and win over the registry file.
+import ner_registry
 
-NER_MODEL_EN    = _default_ner_model()
-# Every language that is not English or one of the nine Indian languages. The default has NO declared licence (a release blocker); the measured open
-# alternative is Davlan/xlm-roberta-base-ner-hrl (AFL-3.0, same size and labels), see evaluation/RESULTS.md "Russian, Arabic, Japanese". Switching is the owner's decision.
-def _env_model(setting: str, default: str) -> str:
-    """A model id or local folder from the environment; empty or unset means the default."""
-    return os.getenv(setting, "").strip() or default
+_NER_REGISTRY = ner_registry.load()
 
-NER_MODEL_MULTI = _env_model("NER_MODEL_MULTI", "Davlan/xlm-roberta-base-wikiann-ner")
-NER_MODEL_HI    = os.getenv("NER_MODEL_HI", "").strip() or "neuronsbyisshu/indicbert-hi-ner-naamapadam"
+NER_MODEL_EN    = _NER_REGISTRY.group_source("en")
+NER_MODEL_HI    = _NER_REGISTRY.group_source("indic")
+NER_MODEL_MULTI = _NER_REGISTRY.group_source("*")
+_NER_LANG_ROUTES = _NER_REGISTRY.language_routes()        # routes for one language (e.g. "fr"), only if a registry file defines any
 
 # Hindi and eight other Indian languages share one open (CC0) model: trained on Hindi only, it transfers to these languages through IndicBERTv2's
 # pretraining (strict F1 0.73-0.85 on human-labelled test sets; see evaluation/RESULTS.md and GET /api/languages for each language's status).
@@ -664,8 +661,19 @@ NER_MODEL_HI    = os.getenv("NER_MODEL_HI", "").strip() or "neuronsbyisshu/indic
 INDIC_NER_LANGS = {"hi", "mr", "bn", "ta", "te", "gu", "kn", "ml", "pa"}
 
 def ner_model_name(lang: str) -> str:
-    """The model used for a language: English, the Indian-language model, or the multilingual one for everything else."""
+    """The model used for a language: a route for that language alone, else English, the Indian-language model, or the multilingual one."""
+    if lang in _NER_LANG_ROUTES:
+        return _NER_LANG_ROUTES[lang]
     return NER_MODEL_EN if lang == "en" else NER_MODEL_HI if lang in INDIC_NER_LANGS else NER_MODEL_MULTI
+
+# A model that cannot be loaded (weights not published yet, no internet) is replaced by its registry 'fallback' so the app keeps working.
+# primary source -> fallback source actually in use; reported by GET /health/models and part of the result-cache key.
+_ner_fallbacks: dict = {}
+
+def effective_ner_model(lang: str) -> str:
+    """The model that really answers for a language (the fallback while the primary cannot be loaded)."""
+    primary = ner_model_name(lang)
+    return _ner_fallbacks.get(primary, primary)
 
 def _plain_fast_tokenizer(model: str):
     """A tokenizer built from tokenizer.json, for models whose tokenizer_config names a class newer than the pinned transformers."""
@@ -724,6 +732,22 @@ def _load_ner_pipeline(model: str, lang: str):
     logger.info(f"Loading NER model {model} …")
     return _hf_ner_pipeline(model)
 
+def _load_ner_with_fallback(model: str, lang: str):
+    """Load `model`; if that fails and the registry names a fallback for it, load the fallback instead (and say so)."""
+    try:
+        nlp = _load_ner_pipeline(model, lang)
+        _ner_fallbacks.pop(model, None)
+        return nlp
+    except Exception as e:
+        fallback = _NER_REGISTRY.fallback_of(model)
+        if not fallback:
+            raise
+        logger.warning(f"NER model {model} could not be loaded ({type(e).__name__}: {str(e)[:200]}). Using the fallback {fallback} "
+                       f"instead; accuracy may be lower. See 'Changing or adding an NER model' in README.md.")
+        nlp = _load_ner_pipeline(fallback, lang)
+        _ner_fallbacks[model] = fallback
+        return nlp
+
 def get_ner_pipeline(lang: str = "en"):
     """Lazy-load one NER pipeline per model (English text uses the English model), keeping at most NER_MAX_MODELS loaded."""
     model = ner_model_name(lang)
@@ -736,7 +760,7 @@ def get_ner_pipeline(lang: str = "en"):
         with _ner_cache_lock:                               # another request may have loaded it while we waited
             if model in _ner_pipelines:
                 return _ner_pipelines[model]
-        nlp = _load_ner_pipeline(model, lang)
+        nlp = _load_ner_with_fallback(model, lang)
         with _ner_cache_lock:
             _ner_pipelines[model] = nlp
             _evict_ner_models()
@@ -780,7 +804,7 @@ def run_ner(text: str, lang: str, progress=None, cancelled=None, batch_size: Opt
     extra  = {"stride": stride} if stride else {}
     if lang in NO_SPACE_LANGS:
         extra["aggregation_strategy"] = "simple"
-    model_id = "|".join([ner_model_name(lang), os.getenv("NER_ONNX_DIR", "") if lang == "en" else "",
+    model_id = "|".join([effective_ner_model(lang), os.getenv("NER_ONNX_DIR", "") if lang == "en" else "",
                          os.getenv("NER_ONNX_FILE", "") if lang == "en" else "", str(stride)])
     results = []
     for i in range(0, len(chunks), batch_size):
@@ -938,6 +962,8 @@ def health_models():
     return {"preload": MODEL_STATUS, "disk": disk_status(),
             "ner_loaded": list(_ner_pipelines),               # least recently used first
             "ner_max_models": _ner_max_models(),
+            "ner_routes": _NER_REGISTRY.describe(INDIC_NER_LANGS),   # which model each language uses (from ner_models.json + settings)
+            "ner_fallbacks": dict(_ner_fallbacks),                   # primary -> fallback, only while a primary could not be loaded
             "translation_loaded": local_translator.loaded_engines()}
 
 # ── Auth ────────────────────────────────────────────────
