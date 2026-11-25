@@ -25,22 +25,33 @@
     },
     "multi-davlan-wikiann": {
       "source": "Davlan/xlm-roberta-base-wikiann-ner",
-      "licence": "none declared on the model card (release blocker, decision D2)",
+      "licence": "none declared on the model card (so it cannot be released with the project)",
       "labels": ["PER", "ORG", "LOC"],
       "evidence": "ru 0.49, ar 0.49, ja 0.35, de 0.51, zh 0.46",
-      "note": "Current default for every other language. Waits for the mentor's decision D2."
+      "note": "The previous default for every other language, replaced by multi-davlan-hrl (decision D2(a)). Kept only so that old results can be reproduced: NER_MODEL_MULTI=multi-davlan-wikiann."
     },
     "multi-davlan-hrl": {
       "source": "Davlan/xlm-roberta-base-ner-hrl",
       "licence": "AFL-3.0",
       "labels": ["PER", "ORG", "LOC"],
-      "evidence": "ru 0.74, ar 0.81, ja 0.64, de 0.82, zh 0.78 (better on every measured language)",
-      "note": "Open-licence candidate to replace multi-davlan-wikiann. Not the default yet: switch by setting routes['*'] to 'multi-davlan-hrl' (or NER_MODEL_MULTI=multi-davlan-hrl)."
+      "evidence": "ru 0.74, ar 0.81, ja 0.64, de 0.82, zh 0.78 (+0.25 to +0.32 over the previous model on every human-labelled set); weaker on lower-case text (es 0.36, de 0.44, fr 0.46)",
+      "note": "Default for every language that has no model of its own (decision D2(a), 2026-11-25): fr, es, de, ru, zh, ar, ja and the rest."
+    },
+    "multi-otter": {
+      "source": "whoisjones/otter-cross-mmbert",
+      "loader": "otter",
+      "trust_remote_code": true,
+      "revision": "8729188e4f5fc7948d0e9dfd7d7e6d36c2e7270d",
+      "threshold": 0.25,
+      "licence": "Apache-2.0",
+      "labels": ["PER", "ORG", "LOC"],
+      "evidence": "best on lower-case text: es 0.70, fr 0.69, de 0.64, zh 0.65 (hrl_base 0.36, 0.46, 0.44, 0.53); weaker on cased ru 0.63 and de 0.78 (hrl_base 0.74, 0.82). Threshold 0.25 tuned on MultiCoNER train sentences.",
+      "note": "NOT routed to any language yet (routing waits for the in-house mixed test set, D3). It runs Python code from its model repository (trust_remote_code, allowed by the owner on 2026-11-25), which is why the commit that was reviewed is pinned above; NER_ALLOW_REMOTE_CODE=0 switches it off. To use it for one language, add to your NER_MODELS_FILE: {\"routes\": {\"es\": \"multi-otter\"}}."
     }
   },
   "routes": {
     "en": "english-b-nofin",
     "indic": "indic-indicbert-hi",
-    "*": "multi-davlan-wikiann"
+    "*": "multi-davlan-hrl"
   }
 }

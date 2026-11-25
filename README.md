@@ -87,7 +87,7 @@ Which entity-recognition model each language uses is **data, not code**: it is l
 |---|---|---|---|
 | `en` | English | `english-b-nofin` (a distilroberta-base student, decision D1); falls back to `english-bert-base` if its weights cannot be loaded | Apache-2.0 base; see THIRD_PARTY_NOTICES |
 | `indic` | Hindi and eight other Indian languages | `indic-indicbert-hi` | CC0-1.0 |
-| `*` | every other language | `multi-davlan-wikiann` (`multi-davlan-hrl` is the open-licence candidate) | none declared (decision D2) |
+| `*` | every other language (French, Spanish, German, Russian, Chinese, Arabic, Japanese, ...) | `multi-davlan-hrl` (decision D2(a)) | AFL-3.0 |
 
 See what the running server uses with `GET /health/models` (`ner_routes`, `ner_fallbacks`), or without starting it: `python backend/ner_registry.py`.
 
@@ -110,6 +110,12 @@ See what the running server uses with `GET /health/models` (`ner_routes`, `ner_f
 If a model cannot be loaded (folder missing, repository not found, no internet) and it has a `fallback`, the app logs a warning, uses the fallback and shows it in
 `/health/models`; without a `fallback` the request fails with the error. Cached entity results are keyed by the model that really answered, so switching
 models never shows another model's old results. Each loaded model takes about 1 GB of memory; `NER_MAX_MODELS` (default 2) limits how many stay loaded.
+**Models that run code from their own repository.** Otter (`multi-otter`, Apache-2.0) is better on lower-case text (Spanish 0.70, French 0.69 against 0.36 and 0.46 for the default), but it
+is not a normal Hugging Face NER model: loading it runs Python code that lives in the model's repository (`trust_remote_code`). The project allows this only under strict rules: the registry entry must say
+`"trust_remote_code": true` and pin a full 40-character `revision` (the commit that was reviewed, never a branch), a model given only by a Hugging Face id or a folder never gets remote code, and
+`NER_ALLOW_REMOTE_CODE=0` in `.env` switches all such models off. It is registered but **not used for any language yet** (routing waits for the in-house mixed test set); to try it for Spanish add
+`{"routes": {"es": "multi-otter"}}` to your `NER_MODELS_FILE`. Before trusting a new revision, read its code and put the new hash in the registry.
+
 `NER_ONNX_DIR` (English only) is an export of ONE specific model: when you change the English model, export the new one again or unset `NER_ONNX_DIR`.
 
 ## Translation providers
@@ -168,8 +174,9 @@ What we measured (full tables, method and caveats in [`evaluation/RESULTS.md`](e
   These tests come from the same data family as the model's training data, and for Hindi the score fell from 0.83 to 0.76 and 0.60 on independent sets, so treat the numbers as optimistic. The language buttons carry a quality badge and a note; the labels come from `backend/language_status.json` (`GET /api/languages`).
   Offline translation (IndicTrans2) covers these languages and Odia and Assamese too (see "Translation providers"); language detection recognises all of them
   by their script (Odia 99.9%, Assamese 92%, the others 96-100% on test sentences).
-* **Other languages (strict F1 on a deliberately hard benchmark: all text lower-cased, short, no punctuation):** German 0.34, Spanish 0.31, Chinese 0.28, French 0.26.
-  Ordinary text should score higher. **Not measured:** Russian, Arabic and Japanese. Chinese and Japanese entity highlighting used to cover whole clauses and was fixed.
+* **Other languages (strict F1 with the default `Davlan/xlm-roberta-base-ner-hrl`, human-labelled test sets, ordinary cased text):** German 0.82, Arabic 0.81 (its training data may include part of that test set), Chinese 0.71-0.78,
+  Russian 0.74, Japanese 0.64-0.72, against 0.35-0.51 for the model used before. On the hard benchmark with all text lower-cased, short and without punctuation it scores German 0.44, Spanish 0.36, French 0.46, Chinese 0.53;
+  organisations are the weakest type everywhere. Spanish and French cased text was measured only on automatically labelled WikiANN data, where the model used before scores higher (0.85 against 0.56-0.61) because it was trained on that data, so that comparison says little. Chinese and Japanese entity highlighting used to cover whole clauses and was fixed.
 
 Accuracy depends on the language, domain and quality of the source text. Spot-check anything that matters.
 
@@ -206,7 +213,8 @@ an accuracy change before proposing it.
   restart does not lose them: finished jobs stay readable and an interrupted job is restarted once automatically.
 * `npm audit` reports findings in the frontend dependency tree. They are in Expo's development tooling (not part of what
   the browser runs) and in `xlsx`, which is used only to *write* spreadsheets, never to read untrusted files.
-* The Davlan model used for entity recognition in languages other than English and Hindi has no declared license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+* The model for languages other than English and the Indian languages (`Davlan/xlm-roberta-base-ner-hrl`) is trained on ten languages and is weaker on text typed without capital letters
+  (Spanish 0.36, German 0.44, French 0.46 on our lower-case test); an alternative that does better there (Otter, below) is registered but not used for any language yet.
 
 ## License
 
@@ -215,5 +223,5 @@ an accuracy change before proposing it.
 ## Acknowledgements
 
 IndicTrans2 and IndicTransToolkit (AI4Bharat, Varun Gumma), the rotary IndicTrans2 models (Gumma, Chitale, Bali),
-Helsinki-NLP OPUS-MT, `dslim/bert-base-NER`, B-noFIN (distilroberta-base), `neuronsbyisshu/indicbert-hi-ner-naamapadam`, `Davlan/xlm-roberta-base-wikiann-ner`, Hugging Face Transformers, FastAPI,
+Helsinki-NLP OPUS-MT, `dslim/bert-base-NER`, B-noFIN (distilroberta-base), `neuronsbyisshu/indicbert-hi-ner-naamapadam`, `Davlan/xlm-roberta-base-ner-hrl`, Hugging Face Transformers, FastAPI,
 Expo / React Native, and the benchmark authors listed in `THIRD_PARTY_NOTICES.md`.

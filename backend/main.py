@@ -643,8 +643,9 @@ _ner_pipelines: dict = {}
 # "Changing or adding an NER model" in README.md). Today:
 #   English: the B-noFIN student (distilroberta-base, PER/ORG/LOC/MISC), decision D1; falls back to dslim/bert-base-NER if its weights cannot be loaded.
 #   Hindi and eight other Indian languages: neuronsbyisshu/indicbert-hi-ner-naamapadam (CC0, PER/ORG/LOC).
-#   Every other language: multilingual XLM-R fine-tuned on WikiANN (PER/ORG/LOC; no declared licence, decision D2). Its head has a DATE label, but it predicted
-#   0 dates on 4,472 Hindi sentences and 2 on 2,737 German/Spanish/French sentences, so dates are effectively not detected for any language.
+#   Every other language: Davlan/xlm-roberta-base-ner-hrl (XLM-R base, AFL-3.0, PER/ORG/LOC), decision D2(a) of 2026-11-25; it replaced the WikiANN model
+#   that had no declared licence. Both models have a DATE label in their output head, but the previous one predicted 0 dates on 4,472 Hindi sentences and 2 on
+#   2,737 German/Spanish/French sentences, and a 5-sentence check found none for the new one either, so dates are effectively not detected.
 # NER_MODEL_EN / NER_MODEL_HI / NER_MODEL_MULTI (a registry name, a Hugging Face id or a local folder) still work and win over the registry file.
 import ner_registry
 
@@ -686,15 +687,27 @@ def _plain_fast_tokenizer(model: str):
     specials = {k: cfg[k] for k in ("unk_token", "pad_token", "cls_token", "sep_token", "mask_token", "bos_token", "eos_token") if k in cfg}
     return PreTrainedTokenizerFast(tokenizer_file=str(file), model_max_length=512, **specials)
 
+def _remote_code_options(model: str) -> dict:
+    """Extra arguments for a model that the registry marks as running code from its own repository (trust_remote_code, with a pinned commit).
+    Only a registry entry can do this (ner_registry checks the pin); NER_ALLOW_REMOTE_CODE=0 refuses it here."""
+    entry = _NER_REGISTRY.options_for(model)
+    if not entry.get("trust_remote_code"):
+        return {}
+    if os.getenv("NER_ALLOW_REMOTE_CODE", "1").strip().lower() in ("0", "false", "no", "off"):
+        raise RuntimeError(f"{model} runs code from its model repository, which is switched off (NER_ALLOW_REMOTE_CODE=0)")
+    logger.warning(f"{model} runs code from its model repository (trust_remote_code), pinned to commit {entry['revision']}.")
+    return {"trust_remote_code": True, "revision": entry["revision"]}
+
 def _hf_ner_pipeline(model: str):
     from transformers import pipeline
+    extra = _remote_code_options(model)
     try:
         # "first" keeps whole words; "simple" splits names into ##subword fragments
-        return pipeline("ner", model=model, aggregation_strategy="first")
+        return pipeline("ner", model=model, aggregation_strategy="first", **extra)
     except ValueError as e:
         if "TokenizersBackend" not in str(e):
             raise
-        return pipeline("ner", model=model, tokenizer=_plain_fast_tokenizer(model), aggregation_strategy="first")
+        return pipeline("ner", model=model, tokenizer=_plain_fast_tokenizer(model), aggregation_strategy="first", **extra)
 
 # Memory limit: each NER model takes about 0.9-1.1 GB of RAM once loaded (measured), and the app has three (English, Indian, multilingual).
 # At most NER_MAX_MODELS stay loaded; when another one is needed, the least recently used is dropped (it is loaded again, in 20-30 s, if needed later).
@@ -730,6 +743,11 @@ def _load_ner_pipeline(model: str, lang: str):
         logger.info(f"Loading ONNX NER model {onnx_dir}/{onnx_file} …")
         return onnx_ner.load_pipeline(onnx_dir, file=onnx_file, threads=os.getenv("TORCH_THREADS") or None)
     logger.info(f"Loading NER model {model} …")
+    entry = _NER_REGISTRY.options_for(model)
+    if entry.get("loader") == "otter":
+        import otter_ner
+        _remote_code_options(model)                      # logs the warning, or refuses when remote code is switched off
+        return otter_ner.load(model, revision=entry["revision"], threshold=entry.get("threshold", 0.25))
     return _hf_ner_pipeline(model)
 
 def _load_ner_with_fallback(model: str, lang: str):
@@ -806,6 +824,9 @@ def run_ner(text: str, lang: str, progress=None, cancelled=None, batch_size: Opt
         extra["aggregation_strategy"] = "simple"
     model_id = "|".join([effective_ner_model(lang), os.getenv("NER_ONNX_DIR", "") if lang == "en" else "",
                          os.getenv("NER_ONNX_FILE", "") if lang == "en" else "", str(stride)])
+    tag = _NER_REGISTRY.variant_tag(effective_ner_model(lang))       # pinned commit / threshold: a different setting must not reuse cached results
+    if tag:
+        model_id += "|" + tag
     results = []
     for i in range(0, len(chunks), batch_size):
         if cancelled and cancelled():
