@@ -125,8 +125,8 @@ logged-in user; another user's ids return 404.
 
 A shared lock makes concurrent callers take turns (the pipelines are not thread-safe).
 
-Optional speed-up: `NER_ONNX_DIR` / `NER_ONNX_FILE` run the English model through ONNX Runtime (`onnx_ner.py`; export once with
-`export_onnx_ner.py`). The fp32 file gives identical predictions and is about 1.7x faster on CPU; the INT8 file is smaller but lost 0.012 F1
+Optional speed-up: a model's registry entry can name an ONNX build (`onnx_dir` / `onnx_file`, run through ONNX Runtime by `onnx_ner.py`; export once with
+`export_onnx_ner.py`, which records the source model so a build is never used for another model; the old `NER_ONNX_DIR` / `NER_ONNX_FILE` setting still works for English but is deprecated). The fp32 file gives identical predictions and is about 1.7x faster on CPU; the INT8 file is smaller but lost 0.012 F1
 on Twitter text. NER batch size defaults to 1 (`NER_BATCH_SIZE`) because batching was slower on CPU. Optional overlapping windows
 (`NER_STRIDE_TOKENS`) and a different chunk size (`NER_CHUNK_CHARS`) exist but did not beat the defaults in our tests.
 

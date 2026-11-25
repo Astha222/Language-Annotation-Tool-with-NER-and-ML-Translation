@@ -116,7 +116,12 @@ is not a normal Hugging Face NER model: loading it runs Python code that lives i
 `NER_ALLOW_REMOTE_CODE=0` in `.env` switches all such models off. It is registered but **not used for any language yet** (routing waits for the in-house mixed test set); to try it for Spanish add
 `{"routes": {"es": "multi-otter"}}` to your `NER_MODELS_FILE`. Before trusting a new revision, read its code and put the new hash in the registry.
 
-`NER_ONNX_DIR` (English only) is an export of ONE specific model: when you change the English model, export the new one again or unset `NER_ONNX_DIR`.
+**Faster CPU inference with ONNX.** An ONNX build of a model (made with `backend/export_onnx_ner.py <model id or folder>`; the fp32 file gives identical predictions and was 1.7-1.9x faster, the INT8 file is smaller but lost accuracy on one test set)
+belongs to ONE model. Attach it to that model's registry entry: `"onnx_dir": "models/my-model-onnx"` (relative to `backend/`, or an absolute path) and optionally `"onnx_file"` (default `model.onnx`, the fp32 build).
+It then serves every language that uses the model. If the file is missing or cannot be loaded (for example `onnxruntime` is not installed) the app logs a warning and uses the normal model, so a request never fails because of it.
+The export script records the source model in `export_info.json` and the app **refuses an export made from a different model**. The old setting `NER_ONNX_DIR` / `NER_ONNX_FILE` still works for English, but it does not say
+which model it belongs to, so it is deprecated (a warning is logged; folders without `export_info.json` cannot be checked): when you change the English model, export the new one again and use the registry instead.
+`GET /health/models` (`ner_onnx`) shows which loaded models run from an ONNX build.
 
 ## Translation providers
 

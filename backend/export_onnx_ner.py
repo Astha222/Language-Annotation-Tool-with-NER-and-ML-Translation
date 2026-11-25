@@ -15,6 +15,7 @@ folder and point this script at it:
     set ONNX_TOOLS_DIR=C:/path/to/onnx-tools
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -30,6 +31,13 @@ CHECK_SENTENCES = [
     "The Borrower shall pay Barclays Bank PLC in London within thirty days.",
     "going to delhi with rahul tomorrow lol",
 ]
+
+
+def write_export_info(out_dir: Path, model_id: str, files, opset: int):
+    """Record which model the folder was exported from; the app refuses to use an export for any other model."""
+    info = {"source": model_id, "files": list(files), "opset": opset, "exported": time.strftime("%Y-%m-%d %H:%M")}
+    (out_dir / "export_info.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
+    return info
 
 
 def export(model_id: str, out_dir: Path, opset: int = 17):
@@ -54,6 +62,7 @@ def export(model_id: str, out_dir: Path, opset: int = 17):
     # per_channel=False: per-channel dynamic quantization has been reported to break some models completely
     quantize_dynamic(str(fp32), str(int8), weight_type=QuantType.QInt8, per_channel=False)
     print(f"fp32 onnx {fp32.stat().st_size / 1e6:.0f} MB -> int8 onnx {int8.stat().st_size / 1e6:.0f} MB")
+    write_export_info(out_dir, model_id, [fp32.name, int8.name], opset)
 
     # accuracy check against the original PyTorch model
     sess = ort.InferenceSession(str(int8), providers=["CPUExecutionProvider"])
