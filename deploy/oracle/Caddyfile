@@ -1,0 +1,13 @@
+# HTTPS for the backend. Caddy gets and renews a free Let's Encrypt certificate for API_DOMAIN by itself.
+# API_DOMAIN must point to the VM's public IP, e.g. 129-154-1-2.sslip.io (works with no sign-up) or a free DuckDNS name.
+{$API_DOMAIN} {
+	encode gzip
+	request_body {
+		max_size 60MB
+	}
+	reverse_proxy backend:8000 {
+		transport http {
+			read_timeout 10m
+		}
+	}
+}
