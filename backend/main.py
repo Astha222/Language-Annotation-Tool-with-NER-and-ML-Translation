@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
@@ -24,6 +24,7 @@ import hinglish
 import script_lang
 import result_cache
 import language_status
+import training_export
 
 # --- Load Environment Variables ---
 load_dotenv()
@@ -1216,12 +1217,17 @@ def delete_annotation(
 
 @app.get("/api/export")
 def export_annotations(
+    format: Optional[str] = None,
+    annotation_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
-    rows = db.query(AnnotationDB).filter(
+    query = db.query(AnnotationDB).filter(
         AnnotationDB.user_id == current_user.id
-    ).order_by(AnnotationDB.id).all()
+    )
+    if annotation_id is not None:
+        query = query.filter(AnnotationDB.id == annotation_id)
+    rows = query.order_by(AnnotationDB.id).all()
     docs   = _mongo_docs([r.id for r in rows])
     result = []
     for row in rows:
@@ -1235,7 +1241,30 @@ def export_annotations(
             "source_name":     row.source_name,
             "ner_tags":        mongo_doc["ner_tags"] if mongo_doc and mongo_doc.get("ner_tags") else [],
         })
-    return result
+
+    if not format:
+        return result
+
+    fmt = format.lower().strip()
+    if fmt in ("conll", "bio", "conll_bio", "conll-bio"):
+        content = training_export.export_conll(result)
+        return PlainTextResponse(
+            content=content,
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=annotations.conll"}
+        )
+    elif fmt == "jsonl":
+        content = training_export.export_jsonl(result)
+        return PlainTextResponse(
+            content=content,
+            media_type="application/x-ndjson; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=annotations.jsonl"}
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported export format '{format}'. Supported formats: conll, jsonl (or omit for raw JSON list)."
+        )
 
 
 # =======================================================

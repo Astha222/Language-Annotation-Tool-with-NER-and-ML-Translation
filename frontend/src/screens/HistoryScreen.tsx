@@ -120,6 +120,17 @@ function exportPDF(annotations: Annotation[]): boolean {
   return exportPdf('Annotations', buildRows(annotations, true));
 }
 
+const EXPORT_OPTIONS: { key: string; label: string }[] = [
+  { key: 'json',  label: '.JSON' },
+  { key: 'csv',   label: '.CSV' },
+  { key: 'xlsx',  label: '.XLSX' },
+  { key: 'txt',   label: '.TXT' },
+  { key: 'xml',   label: '.XML' },
+  { key: 'pdf',   label: '.PDF' },
+  { key: 'conll', label: 'CoNLL / BIO' },
+  { key: 'jsonl', label: 'JSONL' },
+];
+
 // ----------------------------------------------------------------
 // Main Component
 // ----------------------------------------------------------------
@@ -181,6 +192,26 @@ export default function HistoryScreen() {
   const handleExport = async (format: string) => {
     setShowExportMenu(false);
 
+    if (format === 'conll' || format === 'jsonl') {
+      try {
+        const res = await axios.get(`${BACKEND_URL}/api/export?format=${format}`, {
+          ...authHeaders(),
+          responseType: 'text',
+        });
+        if (!res.data || !res.data.trim()) {
+          showToast('No annotations to export', 'error');
+          return;
+        }
+        const mimeType = format === 'jsonl' ? 'application/x-ndjson' : 'text/plain';
+        const ext = format === 'conll' ? 'conll' : 'jsonl';
+        triggerDownload(new Blob([res.data], { type: mimeType }), `annotations_${new Date().toISOString().slice(0, 10)}.${ext}`);
+        showToast(`Exported annotations as ${format === 'conll' ? 'CoNLL / BIO' : 'JSONL'}`, 'success');
+      } catch {
+        showToast(`Failed to export as ${format}`, 'error');
+      }
+      return;
+    }
+
     // Export every saved annotation from the server (the list view only holds the first page)
     let all: Annotation[];
     try {
@@ -227,8 +258,6 @@ export default function HistoryScreen() {
 
   return (
     <View style={styles.root}>
-      {toast && <Toast message={toast.msg} type={toast.type} />}
-
       {/* Action Bar */}
       <View style={styles.actionBar}>
         <TouchableOpacity style={styles.refreshBtn} onPress={fetchAnnotations}>
@@ -245,19 +274,22 @@ export default function HistoryScreen() {
           </TouchableOpacity>
           {showExportMenu && (
             <View style={styles.exportMenu}>
-              {['json', 'csv', 'xlsx', 'txt', 'xml', 'pdf'].map((fmt) => (
+              {EXPORT_OPTIONS.map((opt) => (
                 <TouchableOpacity
-                  key={fmt}
+                  key={opt.key}
                   style={styles.exportMenuItem}
-                  onPress={() => handleExport(fmt)}
+                  onPress={() => handleExport(opt.key)}
                 >
-                  <Text style={styles.exportMenuText}>.{fmt.toUpperCase()}</Text>
+                  <Text style={styles.exportMenuText}>{opt.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           )}
         </View>
       </View>
+
+      {/* Status / Success Toast Message */}
+      {toast && <Toast message={toast.msg} type={toast.type} />}
 
       {/* Count */}
       {annotations.length > 0 && (
@@ -616,18 +648,18 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   toast: {
-    position: 'absolute',
-    top: 10,
-    left: 12,
-    right: 12,
-    zIndex: 999,
-    padding: 14,
+    marginHorizontal: 12,
+    marginBottom: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   toastText: {
     color: '#fff',
     fontWeight: '700',
     fontSize: 14,
+    textAlign: 'center',
   },
 });

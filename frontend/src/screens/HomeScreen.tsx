@@ -94,7 +94,16 @@ const doExport: Record<string, (row: Record<string, string>) => void> = {
   pdf: (row) => { exportPdf('Annotation', [{ ...row, entities: entitiesToText(row.entities) }]); },
 };
 
-const EXPORT_FORMATS = ['json', 'csv', 'xlsx', 'txt', 'xml', 'pdf'];
+const EXPORT_OPTIONS: { key: string; label: string }[] = [
+  { key: 'json',  label: '.JSON' },
+  { key: 'csv',   label: '.CSV' },
+  { key: 'xlsx',  label: '.XLSX' },
+  { key: 'txt',   label: '.TXT' },
+  { key: 'xml',   label: '.XML' },
+  { key: 'pdf',   label: '.PDF' },
+  { key: 'conll', label: 'CoNLL / BIO' },
+  { key: 'jsonl', label: 'JSONL' },
+];
 
 // ── Main Component ─────────────────────────────────────────────
 export default function HomeScreen() {
@@ -362,6 +371,25 @@ export default function HomeScreen() {
     setShowExportMenu(false);
     if (!inputText && !translationResult && savedId === null) { showToast('Nothing to export yet', 'error'); return; }
 
+    if (fmt === 'conll' || fmt === 'jsonl') {
+      if (savedId !== null) {
+        try {
+          const res = await axios.get(`${BACKEND_URL}/api/export?format=${fmt}&annotation_id=${savedId}`, {
+            ...authHeaders(),
+            responseType: 'text',
+          });
+          const mimeType = fmt === 'jsonl' ? 'application/x-ndjson' : 'text/plain';
+          const ext = fmt === 'conll' ? 'conll' : 'jsonl';
+          triggerDownload(new Blob([res.data], { type: mimeType }), `annotation_${Date.now()}.${ext}`);
+          showToast(`Exported as ${fmt === 'conll' ? 'CoNLL / BIO' : 'JSONL'}`, 'success');
+          return;
+        } catch {
+          showToast(`Failed to export as ${fmt}`, 'error');
+          return;
+        }
+      }
+    }
+
     // Prefer the saved server copy so the file matches what is in History even if the input box was edited
     // after analysis; fall back to what is on screen if it was not saved or the fetch fails.
     let row = buildExportRow(inputText, translationResult, nerResults, detectedLang || sourceLang, targetLang);
@@ -589,9 +617,9 @@ export default function HomeScreen() {
                 </TouchableOpacity>
                 {showExportMenu ? (
                   <View style={styles.exportMenu}>
-                    {EXPORT_FORMATS.map((fmt) => (
-                      <TouchableOpacity key={fmt} style={styles.exportMenuItem} onPress={() => handleExport(fmt)}>
-                        <Text style={styles.exportMenuText}>{`.${fmt.toUpperCase()}`}</Text>
+                    {EXPORT_OPTIONS.map((opt) => (
+                      <TouchableOpacity key={opt.key} style={styles.exportMenuItem} onPress={() => handleExport(opt.key)}>
+                        <Text style={styles.exportMenuText}>{opt.label}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>

@@ -4,4 +4,9 @@ import { Platform } from 'react-native';
 //   EXPO_PUBLIC_API_URL=http://192.168.1.20:8000
 // to test on a phone). The Android emulator reaches the host machine at 10.0.2.2.
 export const BACKEND_URL: string =
-  process.env.EXPO_PUBLIC_API_URL || (Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://127.0.0.1:8000');
+  process.env.EXPO_PUBLIC_API_URL ||
+  (Platform.OS === 'android'
+    ? 'http://10.0.2.2:8000'
+    : (typeof window !== 'undefined' && window.location?.hostname
+        ? `${window.location.protocol}//${window.location.hostname}:8000`
+        : 'http://localhost:8000'));
