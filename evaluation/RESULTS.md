@@ -536,6 +536,31 @@ Reading it:
 * B_noFIN's low standard WNUT score (0.483) is the "@" convention learned from BTC; on names only it is the best small model there too.
 * Which seed to ship must be chosen on the validation score (the `training_log.json` files in Google Drive `ws2b_results`), not on these test scores.
 
+### WS2c: the English model trained WITHOUT CoNLL-2003 (backup for the licence question; 2026-11-26; Colab T4, `ws2c_runs`)
+
+`B_noCoNLL_plain`: the `B_noFIN_plain` recipe (distilroberta-base, no teacher, same settings and the same 1,997 WNUT + BTC validation sentences) trained on WNUT-2017 + BTC only
+(8,608 sentences, both CC-BY-4.0), seeds 0, 1, 2. Strict F1 [95% CI]; "names" = names only (E1 artefacts removed). Today's model = `B_noFIN_plain` (seed 1 is the published one).
+
+| test set | B_noCoNLL s0 / s1 / s2 | B_noCoNLL mean +- sd | B_noFIN mean +- sd (seed 1) |
+|---|---|---|---|
+| WNUT-2017 (names) | 0.469 / 0.487 / 0.489 (0.588 / 0.596 / 0.600) | 0.482 +- 0.011 (0.594 +- 0.006) | 0.483 +- 0.012 (0.590 +- 0.015) (s1 0.486) |
+| BTC (names) | 0.815 / 0.810 / 0.813 (0.786 / 0.799 / 0.794) | 0.812 +- 0.002 (0.793 +- 0.006) | 0.812 +- 0.007 (0.792 +- 0.007) (s1 0.818) |
+| FIN | 0.173 / 0.189 / 0.197 | 0.187 +- 0.012 | 0.186 +- 0.006 (s1 0.189) |
+| **English-EWT** (fair test) | **0.711** [0.682, 0.738] / 0.761 [0.735, 0.787] / 0.767 [0.739, 0.792] | **0.746 +- 0.031** | 0.762 +- 0.009 (s1 0.772) |
+| **CoNLL-2003 test** (news) | 0.737 / 0.779 / 0.767 | **0.761 +- 0.022** | s1 0.922 [0.914, 0.930] (in-domain: trained on CoNLL train) |
+
+Paired, same seed (noCoNLL minus noFIN): WNUT -0.001 / +0.002 / -0.003, BTC +0.010 / -0.008 / -0.001, FIN -0.018 / +0.001 / +0.018 (all intervals include 0);
+**English-EWT -0.044 [-0.063, -0.023] (s0), -0.011 [-0.030, +0.007] (s1), +0.006 [-0.011, +0.024] (s2)**; CoNLL test against today's s1: -0.185, -0.143, -0.155 (all intervals below 0).
+Against bert-base-NER on English-EWT: s0 +0.008 [-0.019, +0.035] (no better), s1 +0.058 [+0.034, +0.082], s2 +0.064 [+0.039, +0.090].
+By type on English-EWT: s0 PER 0.821 / ORG 0.567 / LOC 0.710; s1 0.856 / 0.588 / 0.804; s2 0.865 / 0.613 / 0.786 (today's s1: 0.862 / 0.604 / 0.818).
+
+Reading it:
+* **Social media and finance: dropping CoNLL costs nothing** (WNUT, BTC, FIN equal within the seed spread, every paired interval includes 0).
+* **Mixed web text (English-EWT): two of three runs equal today's model, one is much worse.** Seeds 1 and 2 are within 0.011 of it and +0.06 over bert-base; seed 0 is 0.711, no better than bert-base, mostly lower LOC. The spread between runs is 3x larger without CoNLL (sd 0.031 against 0.009): CoNLL made the recipe stable.
+* **The validation set cannot catch a bad run:** seed 0 is normal on WNUT and BTC (the validation data), so choosing on validation F1 might pick it. If this model is ever needed, choose among runs that pass a separate check on held-out mixed text (the in-house set, D3), or train more seeds; the seeds' validation scores (`training_log.json` in Drive `ws2c_results`) are not on the laptop yet.
+* **News text: a clear drop**, 0.76 against 0.92 on the CoNLL test set. Part of the gap is that today's model trained on CoNLL train (in-domain), so its 0.92 overstates what it does on other news; how much is not measured (no other English news test set here).
+* Conclusion for the licence question: **option B is a workable fallback for mixed and social-media text, at the cost of news-style text and of more care when choosing the run.** If CoNLL is acceptable, today's model stays the better one.
+
 ### B-noFIN seed 1: the published seed, and its ONNX build against PyTorch (D6 step 2; 2026-11-26; laptop CPU)
 
 **Seed chosen on validation F1 only** (`training_log.json`, mean strict F1 of the WNUT-2017 + BTC validation sentences, best checkpoint; rule fixed before looking: highest, and the lower seed number when two are within 0.002):
