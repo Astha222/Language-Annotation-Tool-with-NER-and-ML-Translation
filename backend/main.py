@@ -32,7 +32,13 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-POSTGRES_URL       = os.getenv("POSTGRES_URL", "postgresql://postgres:postgres@localhost:5432/annotationtool")
+def database_url(env=os.environ) -> str:
+    """POSTGRES_URL, else DATABASE_URL (the name Railway, Heroku and Render give their Postgres), else a local default.
+    The old "postgres://" scheme some hosts still hand out is not accepted by SQLAlchemy 2, so it is rewritten to "postgresql://"."""
+    url = (env.get("POSTGRES_URL") or env.get("DATABASE_URL") or "").strip() or "postgresql://postgres:postgres@localhost:5432/annotationtool"
+    return "postgresql://" + url[len("postgres://"):] if url.startswith("postgres://") else url
+
+POSTGRES_URL       = database_url()
 MONGO_URL          = os.getenv("MONGO_URL",    "mongodb://localhost:27017")
 MONGO_DB           = os.getenv("MONGO_DB",     "annotationtool")
 JWT_ALGORITHM      = os.getenv("JWT_ALGORITHM","HS256")
@@ -40,7 +46,9 @@ JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
 
 # Never fall back to a known, hardcoded secret: anyone could forge tokens with it.
 # If no real secret is configured, use a random one for this process (logins reset on restart).
-_UNSAFE_SECRETS = {"", "CHANGE_ME_TO_A_LONG_RANDOM_STRING", "supersecretjwtkey2024annotationtool"}
+# Every secret ever written into this public repository is unsafe, however long (the last one is the development default in docker-compose.yml).
+_UNSAFE_SECRETS = {"", "CHANGE_ME_TO_A_LONG_RANDOM_STRING", "supersecretjwtkey2024annotationtool",
+                   "annotationtool_jwt_secret_dev_key_32chars_min!"}
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 if JWT_SECRET in _UNSAFE_SECRETS or len(JWT_SECRET) < 32:
     JWT_SECRET = secrets.token_hex(32)
@@ -55,6 +63,11 @@ CORS_ORIGINS = [o.strip() for o in os.getenv(
     "CORS_ORIGINS",
     "http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006,http://127.0.0.1:19006",
 ).split(",") if o.strip()]
+# Optional: origins matching this regular expression are allowed too, for hosts that give every deployment its own address
+# (Vercel preview deployments: https://<project>-<hash>-<team>.vercel.app). Keep it as narrow as possible, e.g.
+#   CORS_ORIGIN_REGEX=^https://annotation-tool(-[a-z0-9-]+)?\.vercel\.app$
+# Never use a pattern such as .* : any website could then call the API from its users' browsers.
+CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
 
 # -------------------------------------------------------
 # Auth helpers
@@ -264,6 +277,7 @@ async def reject_oversized_uploads(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=False,   # auth uses a Bearer header, not cookies
     allow_methods=["*"],
     allow_headers=["*"],

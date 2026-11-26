@@ -1,0 +1,66 @@
+# The backend and its databases on one Oracle Cloud "Always Free" Arm VM (2 OCPU, 12 GB), behind Caddy for HTTPS.
+# The frontend is NOT here: it is a static site on Vercel. Start on the VM, from this folder:
+#   cp .env.example .env    # then fill it in
+#   docker compose up -d --build
+# See deploy/oracle/README.md.
+
+services:
+  backend:
+    build:
+      context: ../../backend          # the backend's Dockerfile (made by the team); it must install the CPU build of PyTorch
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_URL: postgresql://annotation:${POSTGRES_PASSWORD}@postgres:5432/annotationtool
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: annotationtool
+      HF_HOME: /data/huggingface          # models are downloaded once and kept on the volume
+      DOC_DIR: /data/docs                 # uploaded documents survive a restart, so interrupted jobs can resume
+      RESULT_CACHE_PATH: /data/results.sqlite
+    volumes:
+      - backend-data:/data
+    expose:
+      - "8000"                            # reachable only through Caddy, never directly from the internet
+    depends_on:
+      - postgres
+      - mongo
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: annotation
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: annotationtool
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    # MongoDB's cache takes about half the machine's memory by default; the models need that memory.
+    command: ["--wiredTigerCacheSizeGB", "0.5"]
+    volumes:
+      - mongo-data:/data/db
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
+    ports:
+      - "80:80"                           # needed for the certificate check and the redirect to HTTPS
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data                  # certificates
+      - caddy-config:/config
+    depends_on:
+      - backend
+
+volumes:
+  backend-data:
+  postgres-data:
+  mongo-data:
+  caddy-data:
+  caddy-config:
