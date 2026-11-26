@@ -46,7 +46,9 @@ JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
 
 # Never fall back to a known, hardcoded secret: anyone could forge tokens with it.
 # If no real secret is configured, use a random one for this process (logins reset on restart).
-_UNSAFE_SECRETS = {"", "CHANGE_ME_TO_A_LONG_RANDOM_STRING", "supersecretjwtkey2024annotationtool"}
+# Every secret ever written into this public repository is unsafe, however long (the last one is the development default in docker-compose.yml).
+_UNSAFE_SECRETS = {"", "CHANGE_ME_TO_A_LONG_RANDOM_STRING", "supersecretjwtkey2024annotationtool",
+                   "annotationtool_jwt_secret_dev_key_32chars_min!"}
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 if JWT_SECRET in _UNSAFE_SECRETS or len(JWT_SECRET) < 32:
     JWT_SECRET = secrets.token_hex(32)

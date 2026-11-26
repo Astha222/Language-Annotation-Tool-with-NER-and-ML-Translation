@@ -7,6 +7,10 @@ that is large enough (checked 2026-11-26; free tiers of Render, Koyeb and Railwa
 
 > These files were checked locally (`docker compose config` and a shell syntax check) but **not yet on a real Oracle VM**. Report what differs.
 
+> **On the server use this folder's compose file, not the one at the repository root.** The root `docker-compose.yml` is for running everything on a
+> laptop: it publishes PostgreSQL (5432) and MongoDB (27017, no password) to the network and has development default passwords. On a VM with a
+> public IP that would put the databases on the internet.
+
 ## 1. Account (once)
 - Sign up at oracle.com/cloud/free. Oracle asks for a card to verify identity; Always Free resources are not charged. **Do not upgrade** to
   Pay As You Go unless you mean to: then resources outside the Always Free limits are billed.

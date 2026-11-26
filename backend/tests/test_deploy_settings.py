@@ -36,3 +36,16 @@ def test_the_documented_vercel_pattern_is_narrow():
     for bad in ("http://annotation-tool.vercel.app", "https://annotation-tool.vercel.app.evil.com", "https://evil.com/?annotation-tool.vercel.app",
                 "https://my-annotation-tool.vercel.app", "https://annotation-tool.vercel.app/"):
         assert not pattern.fullmatch(bad)
+
+
+def test_secrets_published_in_the_repository_are_refused(main_module):
+    """docker-compose.yml (local development) ships a 45-character default secret; anyone can read it, so it must never sign real tokens."""
+    import re
+    from pathlib import Path
+    compose = (Path(main_module.__file__).resolve().parents[1] / "docker-compose.yml")
+    if compose.exists():
+        defaults = re.findall(r"JWT_SECRET:\s*\$\{JWT_SECRET:-([^}]*)\}", compose.read_text(encoding="utf-8"))
+        assert defaults, "docker-compose.yml changed how it writes JWT_SECRET: update this test so it still checks the default"
+        for default in defaults:
+            assert default in main_module._UNSAFE_SECRETS
+    assert "annotationtool_jwt_secret_dev_key_32chars_min!" in main_module._UNSAFE_SECRETS
