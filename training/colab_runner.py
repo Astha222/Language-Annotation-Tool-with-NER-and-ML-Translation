@@ -30,7 +30,11 @@ RUNS = [
     # run them with a dev file that has no FIN sentences either (dev_mix_nofin.jsonl), so FIN is not used even to pick the checkpoint.
     ("A_noFIN_distill", STUDENT, "conll2003,wnut2017,btc", 0.5, "licence-safe A: gold labels + teacher, without FIN"),
     ("B_noFIN_plain", STUDENT, "conll2003,wnut2017,btc", 1.0, "licence-safe B: no teacher, without FIN (B was best on English-EWT)"),
+    # option B of the CoNLL question (2026-11-26): CoNLL-2003 is Reuters news text that is distributed for research use, so a model trained on it may not
+    # be publishable under an open licence. Same recipe as B_noFIN_plain, trained only on WNUT-2017 and BTC (both CC-BY-4.0). Run only when named.
+    ("B_noCoNLL_plain", STUDENT, "wnut2017,btc", 1.0, "backup if CoNLL cannot be used: no teacher, no FIN, no CoNLL (WNUT + BTC only)"),
 ]
+LATER = ("noFIN", "noCoNLL")        # experiments added after WS2: the WS2 notebook (no --only) must not run them
 
 
 def command(name, student, sources, alpha, args, seed=0):
@@ -70,7 +74,7 @@ def main():
     for name, student, sources, alpha, why in RUNS:
         if wanted and name not in wanted:
             continue
-        if not wanted and "noFIN" in name:              # added later; run only when asked for by name (the WS2 notebook runs everything)
+        if not wanted and any(tag in name for tag in LATER):   # added later; run only when asked for by name (the WS2 notebook runs everything)
             continue
         for seed in seeds:
             run_name = name if len(seeds) == 1 else f"{name}_s{seed}"

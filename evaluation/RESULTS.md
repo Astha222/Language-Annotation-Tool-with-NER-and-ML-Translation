@@ -536,6 +536,41 @@ Reading it:
 * B_noFIN's low standard WNUT score (0.483) is the "@" convention learned from BTC; on names only it is the best small model there too.
 * Which seed to ship must be chosen on the validation score (the `training_log.json` files in Google Drive `ws2b_results`), not on these test scores.
 
+### B-noFIN seed 1: the published seed, and its ONNX build against PyTorch (D6 step 2; 2026-11-26; laptop CPU)
+
+**Seed chosen on validation F1 only** (`training_log.json`, mean strict F1 of the WNUT-2017 + BTC validation sentences, best checkpoint; rule fixed before looking: highest, and the lower seed number when two are within 0.002):
+s0 0.7544 (epoch 1.5), **s1 0.7646** (epoch 2.5), s2 0.7635 (epoch 2.0) -> **s1**. s1 and s2 differ by less than the noise between runs, so the choice matters little.
+Seed 1's own test scores (from the WS2b table above): English-EWT 0.772, WNUT-2017 0.486 (names only 0.597), BTC 0.818 (names only 0.800), FIN 0.189. By type on English-EWT: PER 0.862, ORG 0.604, LOC 0.818.
+
+**ONNX export** (`backend/export_onnx_ner.py`, opset 17, 145 s): `model.onnx` fp32 326 MB, `model_int8.onnx` INT8 82 MB (INT8 not evaluated: it failed the 0.01 F1 gate for bert-base-NER, so it is not a candidate default).
+The fp32 build was scored through the app's real path (a registry entry with `onnx_dir`, the D6 step 1 code) and compared sentence by sentence with the Colab GPU PyTorch run of the same seed (`evaluation/compare_runs.py`):
+
+| test set | sentences | sentences with different entities | strict F1 PyTorch (GPU) | strict F1 ONNX fp32 (CPU) | difference | largest score difference | gate |
+|---|---|---|---|---|---|---|---|
+| WNUT-2017 | 1,287 | 0 | 0.486 | 0.486 | +0.0000 | 0.0001 | pass |
+| BTC | 2,000 | 0 | 0.818 | 0.818 | +0.0000 | 0.0001 | pass |
+| FIN | 305 | 0 | 0.189 | 0.189 | +0.0000 | 0.0000 | pass |
+| English-EWT | 2,077 | 0 | 0.772 | 0.772 | +0.0000 | 0.0001 | pass |
+
+**Gate passed: identical predictions on all 5,669 sentences** (on different hardware: GPU PyTorch against CPU ONNX Runtime).
+
+**Speed** (`evaluation/bench_latency.py`, the app's `run_ner` path, batch 1, 4 threads, 30 timed calls after 20 warm-up; the laptop was busy: CPU load 42% and 1.4 GB free RAM before the runs, so p95 values swing and only p50 is compared):
+
+| engine | ~200 chars p50 / p95 | ~2,000 chars p50 / p95 | peak RAM | cold start |
+|---|---|---|---|---|
+| B-noFIN, PyTorch | 152 / 221 ms | 872 / 1,141 ms | 0.73 GB | 12.3 s |
+| B-noFIN, ONNX fp32 | **75** / 133 ms | **651** / 2,912 ms | 0.87 GB | 13.1 s |
+| bert-base-NER (previous default), PyTorch, same session | 304 / 513 ms | 1,875 / 2,538 ms | 0.88 GB | 16.9 s |
+
+Two more paired medium runs (ONNX then PyTorch, no file saved): p50 699 against 1,159 ms and 811 against 1,298 ms. ONNX fp32 is faster at p50 in all three pairs (1.3x-1.7x on ~2,000 characters, 2x on ~200);
+its p95 is not reliable on this busy laptop (888 to 2,912 ms across runs). B-noFIN with PyTorch is about 1.4x-2x faster than bert-base-NER at p50, and with ONNX about 2.3x-2.9x.
+The ONNX build needs about 0.14 GB more peak memory than PyTorch here.
+
+Reading it:
+* For B-noFIN, ONNX fp32 changes **nothing** in the output and is faster at the median: it meets the D6 condition ("identical output"). Making it the default is the mentor's decision (D6).
+* To be the default for everyone, the ONNX file has to reach every installation: publish it with the weights (for example `onnx/model.onnx` in the same Hugging Face repository) and let the registry download it, or export on first start (that needs the `onnx` package, which conflicts with the protobuf version other packages pin). Not built yet.
+* Not measured: INT8 for this model; a quiet machine (repeat the timing on the hosting machine before quoting a p95).
+
 ### Replacing the unlicensed multilingual model: tuned zero-shot models and specialists (items 1 and 3 of the brief, research R4; 2026-11-19; Colab T4, `ws3g_runs`)
 
 Zero-shot thresholds were chosen on the MultiCoNER **train** samples (`mc_*_tune`, 600 sentences each for de/es/fr; `evaluation/tune_threshold.py`), never on a test set: **Otter 0.25, GLiNER-X base 0.70, GLiNER-X small 0.60** (default 0.5). The tuned values were then used for every language. Strict F1:

@@ -24,7 +24,7 @@ It is the default English model of the open-source
 [Language Annotation Tool](https://github.com/Astha222/Language-Annotation-Tool-with-NER-and-ML-Translation) (UPES), where it is called `english-b-nofin`.
 
 Short version: on English web text that it was not trained on (emails, reviews, forum posts) it finds names better than `dslim/bert-base-NER`
-(strict F1 **0.762 +- 0.009** against 0.703), with a smaller model (82 M against about 108 M parameters) that runs about twice as fast on a CPU. It is weaker on organisations, and it was never tested on legal, medical or non-English text.
+(strict F1 **0.762 +- 0.009** against 0.703), with a smaller model (82 M against about 108 M parameters) that was 1.4x-2x faster on a laptop CPU, and 2.3x-2.9x faster with its ONNX build (identical output). It is weaker on organisations, and it was never tested on legal, medical or non-English text.
 
 ## Use
 
@@ -70,7 +70,7 @@ The validation sentences used to choose the best checkpoint are 1,997 WNUT-2017 
 `training/distill.py` in the project repository, with `--alpha 1.0` (gold labels only), `--sources conll2003,wnut2017,btc`:
 4 epochs, batch 32, learning rate 5e-5, AdamW, maximum 128 tokens, mixed precision, one Colab T4 GPU; the checkpoint with the best mean validation F1 is kept.
 **Case augmentation:** every epoch each sentence is shown as the original (65%), all lower-case (30%) or all upper-case (5%), so the model also copes with text typed without capital letters.
-Three training runs with different random starts (seeds 0, 1, 2) were made; **the published weights are one of them** (see "Published weights" below).
+Three training runs with different random starts (seeds 0, 1, 2) were made; **the published weights are seed 1**, chosen on validation F1 (see "Published weights" below).
 
 ## Evaluation
 
@@ -89,7 +89,7 @@ No model in this table was trained on it.
 | `Jean-Baptiste/roberta-large-ner-english` (355 M parameters, 4x larger; reference) | 0.793 [0.771, 0.816] |
 
 All three runs are better than bert-base-NER with every interval above 0, and the spread between runs is small (sd 0.009), so the result does not depend on a lucky seed.
-By type (the same recipe trained with FIN, one run, EWT): PER 0.87, ORG 0.61, LOC 0.82; the per-type scores of the three noFIN runs were not recorded. **Organisations are the weakest type.**
+By type, published run (seed 1), EWT: PER 0.862 (P 0.835, R 0.891), ORG 0.604 (P 0.572, R 0.640), LOC 0.818 (P 0.771, R 0.871). **Organisations are the weakest type.**
 
 ### Social-media test sets (names only, three runs, mean +- sd)
 
@@ -107,8 +107,15 @@ FIN (financial contracts, not used in training) scores 0.186 +- 0.006: **do not 
 
 ### Speed
 
-Same architecture and size as the project's earlier DistilRoBERTa student A, which was timed on a laptop CPU (4 threads, about 2,000 characters of text): p95 956 ms with PyTorch and 670 ms
-with ONNX fp32, against 2,003 ms for `dslim/bert-base-NER`. This model itself was not timed separately.
+Timed on a laptop CPU (4 threads, batch 1, the tool's own path including text chunking; median of 30 calls; the laptop was busy, so the 95th percentiles swung and are not quoted):
+
+| | ~200 characters | ~2,000 characters | peak memory |
+|---|---|---|---|
+| this model, PyTorch | 152 ms | 872-1,298 ms | 0.73 GB |
+| this model, ONNX fp32 (`onnx_ner.py` in the project) | 75 ms | 651-811 ms | 0.87 GB |
+| `dslim/bert-base-NER`, PyTorch, same session | 304 ms | 1,875 ms | 0.88 GB |
+
+The ONNX fp32 build gives **identical predictions** to PyTorch on all 5,669 test sentences above (0 sentences differ; largest score difference 0.0001). An INT8 build (82 MB) exists but was not evaluated.
 
 ## Intended use and limits
 
@@ -129,11 +136,11 @@ The model was not checked for differences between groups of names.
 
 | | |
 |---|---|
-| Seed published | **TO FILL IN** (0, 1 or 2) |
-| Why this seed | **TO FILL IN**: chosen on validation F1 (`training_log.json`), not on a test score |
-| Best validation F1 of that run | **TO FILL IN** |
-| Strict F1 of that run on EWT / WNUT-2017 names / BTC names | **TO FILL IN** (the three-run means above describe the recipe; this run's own scores are in `ws2b_runs`) |
-| File format | PyTorch (`model.safetensors`), about 316 MB |
+| Seed published | **1** (`B_noFIN_plain_s1`) |
+| Why this seed | Highest validation F1 (rule fixed in advance: highest, and the lower seed number if two are within 0.002); test scores were not used. s0 0.7544, s1 0.7646, s2 0.7635: s1 and s2 are within noise of each other |
+| Best validation F1 of that run | 0.7646 (mean of WNUT-2017 0.7293 and BTC 0.8000 validation F1; checkpoint at epoch 2.5 of 4) |
+| Strict F1 of that run | English-EWT 0.772 [0.744, 0.798]; WNUT-2017 0.486 (names only 0.597); BTC 0.818 (names only 0.800); FIN 0.189. The three-run means above describe the recipe; this row describes the file you download. |
+| File format | PyTorch (`model.safetensors`), 326 MB |
 
 ## Licences and provenance
 
