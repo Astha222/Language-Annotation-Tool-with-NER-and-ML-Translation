@@ -93,7 +93,11 @@ def create_access_token(data: dict) -> str:
 # -------------------------------------------------------
 # SQLite: several threads write (requests and document jobs, which save their progress); wait up to 30 s for a lock instead of the default 5 s
 connect_args = {"check_same_thread": False, "timeout": 30} if POSTGRES_URL.startswith("sqlite") else {}
-engine       = create_engine(POSTGRES_URL, connect_args=connect_args)
+engine       = create_engine(
+    POSTGRES_URL,
+    connect_args=connect_args,
+    **({} if POSTGRES_URL.startswith("sqlite") else {"pool_size": 20, "max_overflow": 40, "pool_pre_ping": True}),
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base         = declarative_base()
 
@@ -114,6 +118,10 @@ class AnnotationDB(Base):
     source_lang     = Column(String(10), default="en")
     target_lang     = Column(String(10), default="fr")
     source_name     = Column(String(255), nullable=True)   # uploaded file name, if any
+    review_status   = Column(String(20), default="pending")   # pending | approved | rejected
+    review_notes    = Column(Text, nullable=True)
+    reviewed_by     = Column(String(100), nullable=True)
+    reviewed_at     = Column(String(50), nullable=True)
     owner           = relationship("UserDB", back_populates="annotations")
 
 class JobDB(Base):
@@ -138,8 +146,12 @@ class JobDB(Base):
 # Add columns that older databases don't have yet (safe migration)
 from sqlalchemy import inspect, text
 _COLUMN_MIGRATIONS = [
-    ("user_id",     "INTEGER REFERENCES users(id)"),
-    ("source_name", "VARCHAR(255)"),
+    ("user_id",       "INTEGER REFERENCES users(id)"),
+    ("source_name",   "VARCHAR(255)"),
+    ("review_status", "VARCHAR(20) DEFAULT 'pending'"),
+    ("review_notes",  "TEXT"),
+    ("reviewed_by",   "VARCHAR(100)"),
+    ("reviewed_at",   "VARCHAR(50)"),
 ]
 def _add_missing_columns():
     try:
@@ -1282,6 +1294,133 @@ def export_annotations(
 
 
 # =======================================================
+# REVIEW / HUMAN VERIFICATION endpoints
+# =======================================================
+
+class ReviewUpdate(BaseModel):
+    review_status: str          # "approved" | "rejected" | "pending"
+    review_notes:  Optional[str] = None
+
+class AnnotationPatch(BaseModel):
+    original_text:   Optional[str] = None
+    translated_text: Optional[str] = None
+    ner_tags:        Optional[str] = None
+
+def _build_review_response(row: AnnotationDB, mongo_doc) -> dict:
+    tags = mongo_doc["ner_tags"] if mongo_doc and mongo_doc.get("ner_tags") else []
+    return {
+        "id":             row.id,
+        "original_text":  (row.original_text or "")[:LIST_TEXT_CHARS],
+        "translated_text": row.translated_text,
+        "source_lang":    row.source_lang or "en",
+        "target_lang":    row.target_lang or "fr",
+        "source_name":    row.source_name,
+        "ner_tags":       json.dumps(tags[:LIST_MAX_ENTITIES]) if tags else None,
+        "review_status":  getattr(row, "review_status", None) or "pending",
+        "review_notes":   getattr(row, "review_notes", None),
+        "reviewed_by":    getattr(row, "reviewed_by", None),
+        "reviewed_at":    getattr(row, "reviewed_at", None),
+    }
+
+@app.get("/api/review")
+def get_review_queue(
+    page: int = 1,
+    limit: int = 20,
+    status: str = "all",
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    """List annotations for human review. status=all|pending|approved|rejected"""
+    limit = max(1, min(limit, 100))
+    page  = max(1, page)
+    query = db.query(AnnotationDB).filter(AnnotationDB.user_id == current_user.id)
+    if status in ("pending", "approved", "rejected"):
+        query = query.filter(AnnotationDB.review_status == status)
+    total = query.count()
+    rows  = query.order_by(AnnotationDB.id.desc()).offset((page - 1) * limit).limit(limit).all()
+    docs  = _mongo_docs([r.id for r in rows])
+    return {
+        "total": total,
+        "page":  page,
+        "limit": limit,
+        "pages": max(1, (total + limit - 1) // limit),
+        "items": [_build_review_response(r, docs.get(r.id)) for r in rows],
+    }
+
+@app.patch("/api/annotations/{annotation_id}/review")
+def review_annotation(
+    annotation_id: int,
+    update: ReviewUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    """Approve, reject or reset an annotation's review status."""
+    if update.review_status not in ("pending", "approved", "rejected"):
+        raise HTTPException(status_code=400, detail="review_status must be pending, approved, or rejected")
+    row = db.query(AnnotationDB).filter(
+        AnnotationDB.id == annotation_id,
+        AnnotationDB.user_id == current_user.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+    row.review_status = update.review_status
+    row.review_notes  = update.review_notes
+    row.reviewed_by   = current_user.username
+    row.reviewed_at   = datetime.now(timezone.utc).isoformat()
+    db.commit()
+    db.refresh(row)
+    mongo_doc = ner_collection.find_one({"annotation_id": annotation_id})
+    return _build_review_response(row, mongo_doc)
+
+@app.patch("/api/annotations/{annotation_id}")
+def patch_annotation(
+    annotation_id: int,
+    update: AnnotationPatch,
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    """Edit original text, translation, or NER tags of a saved annotation."""
+    row = db.query(AnnotationDB).filter(
+        AnnotationDB.id == annotation_id,
+        AnnotationDB.user_id == current_user.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+    new_tags = _parse_ner_tags(update.ner_tags) if update.ner_tags is not None else None
+    if update.original_text   is not None: row.original_text   = update.original_text
+    if update.translated_text is not None: row.translated_text = update.translated_text
+    if new_tags is not None:
+        try:
+            ner_collection.update_one(
+                {"annotation_id": annotation_id},
+                {"$set": {"ner_tags": new_tags}},
+                upsert=True,
+            )
+        except PyMongoError as e:
+            db.rollback()
+            logger.error(f"MongoDB update failed: {e}")
+            raise HTTPException(status_code=503, detail="NER store unavailable; nothing was updated.")
+    # reset review status when content changes
+    row.review_status = "pending"
+    row.reviewed_by   = None
+    row.reviewed_at   = None
+    db.commit()
+    db.refresh(row)
+    mongo_doc = ner_collection.find_one({"annotation_id": annotation_id})
+    return _build_review_response(row, mongo_doc)
+
+# =======================================================
+# HEALTH endpoint (for load balancers / monitoring)
+# =======================================================
+
+@app.get("/api/health")
+def api_health():
+    """Quick health check — no auth required. Useful for load balancers."""
+    with JOBS_LOCK:
+        running = sum(1 for j in JOBS.values() if j.get("status") in ("queued", "running"))
+    return {"status": "ok", "jobs_running": running}
+
+# =======================================================
 # DOCUMENTS: upload -> extract text -> background analyze/translate job
 # =======================================================
 MAX_DOC_CHARS             = 1_000_000   # ~400 pages of text
@@ -1471,6 +1610,70 @@ def upload_document(file: UploadFile = File(...), current_user: UserDB = Depends
         "preview":           text[:DOC_PREVIEW_CHARS],
         "detected_language": detect_language(text[:5000]),
     }
+
+@app.post("/api/documents/bulk")
+async def upload_documents_bulk(
+    files: List[UploadFile] = File(...),
+    current_user: UserDB = Depends(get_current_user),
+):
+    """Upload up to 20 files at once. Returns {uploaded: [...], errors: [...]}."""
+    MAX_BULK = 20
+    if len(files) > MAX_BULK:
+        raise HTTPException(status_code=400, detail=f"Too many files (max {MAX_BULK} per request).")
+    _purge_old()
+
+    def _process_one(file: UploadFile):
+        name = Path(file.filename or "document").name[:200]
+        try:
+            ext = doc_extract.check_supported(name)
+        except doc_extract.ExtractionError as e:
+            return None, {"filename": name, "error": str(e)}
+        doc_id   = uuid.uuid4().hex
+        tmp_path = DOC_DIR / f"upload_{doc_id}{ext}"
+        size = 0
+        try:
+            with open(tmp_path, "wb") as out:
+                while True:
+                    buf = file.file.read(1024 * 1024)
+                    if not buf:
+                        break
+                    size += len(buf)
+                    if size > MAX_UPLOAD_BYTES:
+                        return None, {"filename": name, "error": f"File too large (max {MAX_UPLOAD_MB} MB)."}
+                    out.write(buf)
+            if size == 0:
+                return None, {"filename": name, "error": "The file is empty."}
+            try:
+                text, info = doc_extract.extract_text(tmp_path, name)
+            except doc_extract.ExtractionError as e:
+                return None, {"filename": name, "error": str(e)}
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if len(text) > MAX_DOC_CHARS:
+            return None, {"filename": name, "error": f"Document too large ({len(text):,} chars; max {MAX_DOC_CHARS:,})."}
+        (DOC_DIR / f"{doc_id}.txt").write_text(text, encoding="utf-8")
+        meta = {"user_id": current_user.id, "filename": name, "size": size, "chars": len(text), "info": info}
+        (DOC_DIR / f"{doc_id}.json").write_text(json.dumps(meta), encoding="utf-8")
+        logger.info(f"Bulk upload: {name} ({size} bytes) -> {len(text)} chars for user {current_user.id}")
+        return {
+            "doc_id":            doc_id,
+            "filename":          name,
+            "size":              size,
+            "chars":             len(text),
+            "words":             len(text.split()),
+            "info":              info,
+            "preview":           text[:DOC_PREVIEW_CHARS],
+            "detected_language": detect_language(text[:5000]),
+        }, None
+
+    loop = asyncio.get_event_loop()
+    results = await asyncio.gather(*[loop.run_in_executor(None, _process_one, f) for f in files])
+    uploaded = [r for r, e in results if r is not None]
+    errors   = [e for r, e in results if e is not None]
+    return {"uploaded": uploaded, "errors": errors}
 
 @app.delete("/api/documents/{doc_id}")
 def delete_document(doc_id: str, current_user: UserDB = Depends(get_current_user)):
