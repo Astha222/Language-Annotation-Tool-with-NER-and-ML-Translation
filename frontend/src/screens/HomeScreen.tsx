@@ -1,37 +1,46 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, ScrollView, Platform,
 } from 'react-native';
 import axios from 'axios';
+import { LANGUAGE_NAMES, useLanguageTable, offeredLanguages, badgeFor, languageNote } from '../utils/languages';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../context/AuthContext';
+import { exportPdf } from '../utils/pdfExport';
+import { entitiesToText } from '../utils/entities';
+import { makeSheet } from '../utils/xlsxSafe';
 
-const BACKEND_URL = Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://127.0.0.1:8000';
+import { BACKEND_URL } from '../config';
+
+// Files the backend can read (see backend/doc_extract.py); anything else is rejected with a clear message
+const DOC_ACCEPT = '.pdf,.docx,.xlsx,.xlsm,.pptx,.odt,.ods,.odp,.csv,.tsv,.txt,.md,.log,.json,.xml,.html,.htm';
+const MAX_UPLOAD_MB = 50;
+// small plain-text files still load straight into the editable text box
+const INLINE_TEXT_MAX_BYTES = 200 * 1024;
+
+interface DocInfo {
+  doc_id: string; filename: string; size: number; chars: number; words: number;
+  info: Record<string, number>; preview: string; detected_language: string | null;
+}
+interface JobState { status: string; stage: string; progress: number }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const fmtSize = (b: number) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+const INFO_LABEL: Record<string, string> = {
+  pages: 'pages', sheets: 'sheets', rows: 'rows', slides: 'slides', paragraphs: 'paragraphs', tables: 'tables',
+};
 
 const NER_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   PER:  { bg: '#e3f2fd', text: '#1565c0', label: 'Person' },
   ORG:  { bg: '#e8f5e9', text: '#2e7d32', label: 'Organization' },
   LOC:  { bg: '#fff3e0', text: '#e65100', label: 'Location' },
   MISC: { bg: '#f3e5f5', text: '#6a1b9a', label: 'Miscellaneous' },
+  DATE: { bg: '#e0f7fa', text: '#00695c', label: 'Date' },
 };
 
-const SOURCE_LANGUAGES = [
-  { code: 'auto', name: 'Auto Detect' },
-  { code: 'en',   name: 'English' },
-  { code: 'hi',   name: 'Hindi' },
-  { code: 'fr',   name: 'French' },
-  { code: 'es',   name: 'Spanish' },
-  { code: 'de',   name: 'German' },
-  { code: 'zh',   name: 'Chinese' },
-  { code: 'ar',   name: 'Arabic' },
-  { code: 'ja',   name: 'Japanese' },
-  { code: 'ru',   name: 'Russian' },
-];
-
-const TARGET_LANGUAGES = SOURCE_LANGUAGES.filter((l) => l.code !== 'auto');
-
-const LANG_NAME: Record<string, string> = Object.fromEntries(SOURCE_LANGUAGES.map((l) => [l.code, l.name]));
+// The language lists come from utils/languages.ts: the base languages plus every Indian language the backend says is offered.
+const LANG_NAME: Record<string, string> = LANGUAGE_NAMES;
 
 // ── Toast ──────────────────────────────────────────────────────
 function Toast({ message, type }: { message: string; type: 'success' | 'error' | 'info' }) {
@@ -71,7 +80,7 @@ const doExport: Record<string, (row: Record<string, string>) => void> = {
     triggerDownload(new Blob([`${h}\n${v}`], { type: 'text/csv' }), `annotation_${Date.now()}.csv`);
   },
   xlsx: (row) => {
-    const ws = XLSX.utils.json_to_sheet([row]);
+    const ws = makeSheet([row]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Annotation');
     XLSX.writeFile(wb, `annotation_${Date.now()}.xlsx`);
@@ -82,17 +91,19 @@ const doExport: Record<string, (row: Record<string, string>) => void> = {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<annotation>\n${Object.entries(row).map(([k, v]) => `  <${k}>${esc(v)}</${k}>`).join('\n')}\n</annotation>`;
     triggerDownload(new Blob([xml], { type: 'application/xml' }), `annotation_${Date.now()}.xml`);
   },
-  pdf: (row) => {
-    const lines = Object.entries(row).map(([k, v]) => `${k}: ${v}`);
-    const body = lines.map((l, i) =>
-      `BT /F1 10 Tf 40 ${720 - i * 16} Td (${l.replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)')}) Tj ET`
-    ).join('\n');
-    const pdf = `%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>>>>>>>endobj\n4 0 obj<</Length ${body.length}>>\nstream\n${body}\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \ntrailer<</Size 5/Root 1 0 R>>\nstartxref\n0\n%%EOF`;
-    triggerDownload(new Blob([pdf], { type: 'application/pdf' }), `annotation_${Date.now()}.pdf`);
-  },
+  pdf: (row) => { exportPdf('Annotation', [{ ...row, entities: entitiesToText(row.entities) }]); },
 };
 
-const EXPORT_FORMATS = ['json', 'csv', 'xlsx', 'txt', 'xml', 'pdf'];
+const EXPORT_OPTIONS: { key: string; label: string }[] = [
+  { key: 'json',  label: '.JSON' },
+  { key: 'csv',   label: '.CSV' },
+  { key: 'xlsx',  label: '.XLSX' },
+  { key: 'txt',   label: '.TXT' },
+  { key: 'xml',   label: '.XML' },
+  { key: 'pdf',   label: '.PDF' },
+  { key: 'conll', label: 'CoNLL / BIO' },
+  { key: 'jsonl', label: 'JSONL' },
+];
 
 // ── Main Component ─────────────────────────────────────────────
 export default function HomeScreen() {
@@ -102,39 +113,152 @@ export default function HomeScreen() {
   const [inputText, setInputText]               = useState('');
   const [sourceLang, setSourceLang]             = useState('auto');
   const [targetLang, setTargetLang]             = useState('fr');
+  const langTable = useLanguageTable();            // quality status of each Indian language (GET /api/languages)
+  const targetLanguages = offeredLanguages(langTable);
+  const sourceLanguages = [{ code: 'auto', name: 'Auto Detect' }, ...targetLanguages];
   const [loading, setLoading]                   = useState(false);
   const [nerResults, setNerResults]             = useState<any[]>([]);
   const [translationResult, setTranslationResult] = useState('');
   const [detectedLang, setDetectedLang]         = useState('');
   const [toast, setToast]                       = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [saved, setSaved]                       = useState(false);
+  const [savedId, setSavedId]                   = useState<number | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [showExportMenu, setShowExportMenu]     = useState(false);
+
+  // document (file upload) mode
+  const [doc, setDoc]                           = useState<DocInfo | null>(null);
+  const [uploading, setUploading]               = useState(false);
+  const [uploadPct, setUploadPct]               = useState(0);
+  const [job, setJob]                           = useState<JobState | null>(null);
+  const [nerSummary, setNerSummary]             = useState<{ total: number; unique: number } | null>(null);
+  const [resultNote, setResultNote]             = useState('');
+  const [engineNote, setEngineNote]             = useState('');   // which translator produced the output
+  const [jobWarnings, setJobWarnings]           = useState<string[]>([]);
+  const jobIdRef = useRef('');
+  const pollRef  = useRef({ stop: false });
+  // keep the latest token/doc reachable from the file-input callback
+  const uploadRef = useRef<(f: File) => void>(() => {});
+
+  // bulk upload state
+  const [bulkUploading, setBulkUploading]       = useState(false);
+  const [bulkResults, setBulkResults]           = useState<{ uploaded: DocInfo[]; errors: { filename: string; error: string }[] } | null>(null);
+
+  useEffect(() => () => { pollRef.current.stop = true; }, []);   // stop polling when leaving the screen
 
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
 
+  const resetResults = () => {
+    setNerResults([]); setTranslationResult(''); setDetectedLang(''); setSaved(false); setSavedId(null);
+    setNerSummary(null); setResultNote(''); setJobWarnings([]); setEngineNote('');
+  };
+
+  const removeDocOnServer = (id: string) => {
+    axios.delete(`${BACKEND_URL}/api/documents/${id}`, authHeaders()).catch(() => {});
+  };
+
+  const removeDoc = () => {
+    if (doc) removeDocOnServer(doc.doc_id);
+    setDoc(null); setUploadedFileName(''); resetResults();
+  };
+
+  const uploadDocument = async (file: File) => {
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      showToast(`File too large (max ${MAX_UPLOAD_MB} MB)`, 'error');
+      return;
+    }
+    setUploading(true); setUploadPct(0); resetResults();
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await axios.post(`${BACKEND_URL}/api/documents`, form, {
+        ...authHeaders(),
+        onUploadProgress: (e) => { if (e.total) setUploadPct(Math.round((100 * e.loaded) / e.total)); },
+      });
+      if (doc) removeDocOnServer(doc.doc_id);       // replacing an earlier upload
+      const d: DocInfo = res.data;
+      setDoc(d); setInputText(''); setUploadedFileName(d.filename);
+      if (sourceLang === 'auto' && d.detected_language) setDetectedLang(d.detected_language);
+      showToast(`"${d.filename}" ready - ${d.chars.toLocaleString()} characters`, 'success');
+    } catch (err: any) {
+      if (err?.response?.status === 401) return;     // session expired: the interceptor logs out
+      const detail = err?.response?.data?.detail;
+      showToast(typeof detail === 'string' ? detail : 'Upload failed - is the file under 50 MB?', 'error');
+    } finally {
+      setUploading(false);
+    }
+  };
+  uploadRef.current = uploadDocument;
+
   // Programmatic file input — avoids DOM nesting error in React Native Web
   const triggerFileInput = useCallback(() => {
     if (typeof document === 'undefined') return;
     const inp = document.createElement('input');
     inp.type = 'file';
-    inp.accept = '.txt,.csv,.json,.xml,.md';
+    inp.accept = DOC_ACCEPT;
     inp.onchange = (e: any) => {
       const file: File = e.target?.files?.[0];
       if (!file) return;
-      setUploadedFileName(file.name);
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        setInputText(evt.target?.result as string || '');
-        showToast(`"${file.name}" loaded`, 'success');
-      };
-      reader.readAsText(file);
+      if (/\.(txt|md)$/i.test(file.name) && file.size <= INLINE_TEXT_MAX_BYTES) {
+        // small plain text: load into the editable box as before
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          setDoc(null);
+          setUploadedFileName(file.name);
+          setInputText((evt.target?.result as string) || '');
+          showToast(`"${file.name}" loaded`, 'success');
+        };
+        reader.readAsText(file);
+      } else {
+        uploadRef.current(file);
+      }
     };
     inp.click();
   }, []);
+
+  // Bulk file upload trigger (up to 20 files)
+  const triggerBulkFileInput = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = DOC_ACCEPT;
+    inp.multiple = true;
+    inp.onchange = async (e: any) => {
+      const files: File[] = Array.from(e.target?.files || []);
+      if (!files.length) return;
+      if (files.length > 20) { showToast('Max 20 files at once', 'error'); return; }
+      if (files.length === 1) { uploadRef.current(files[0]); return; }
+      setBulkUploading(true);
+      setBulkResults(null);
+      try {
+        const form = new FormData();
+        files.forEach(f => form.append('files', f));
+        const res = await axios.post(`${BACKEND_URL}/api/documents/bulk`, form, authHeaders());
+        setBulkResults(res.data);
+        const { uploaded, errors } = res.data;
+        showToast(
+          `${uploaded.length} file${uploaded.length !== 1 ? 's' : ''} uploaded${errors.length ? `, ${errors.length} failed` : ''}`,
+          errors.length ? 'info' : 'success',
+        );
+        // Auto-select the first successfully uploaded document
+        if (uploaded.length > 0) {
+          if (doc) removeDocOnServer(doc.doc_id);
+          setDoc(uploaded[0]);
+          setUploadedFileName(uploaded[0].filename);
+          if (sourceLang === 'auto' && uploaded[0].detected_language) setDetectedLang(uploaded[0].detected_language);
+        }
+      } catch (err: any) {
+        if (err?.response?.status === 401) return;
+        showToast(err?.response?.data?.detail || 'Bulk upload failed', 'error');
+      } finally {
+        setBulkUploading(false);
+      }
+    };
+    inp.click();
+  }, [doc, sourceLang]);
 
   const copyText = async (text: string, label = 'Copied!') => {
     try {
@@ -153,10 +277,80 @@ export default function HomeScreen() {
     showToast('Input saved as .txt', 'success');
   };
 
+  // ── uploaded document: background job on the server, polled for progress ──
+  const applyJobResult = (j: any) => {
+    const res = j.result;
+    const preview: string = res.translated_preview || '';
+    setDetectedLang(res.source_lang);
+    setTranslationResult(preview);
+    setNerResults(res.entities || []);
+    setNerSummary({ total: res.entity_total, unique: res.entity_unique });
+    setSavedId(res.annotation_id); setSaved(true);
+    setJobWarnings(j.warnings || []);
+    setEngineNote((res.translation_engines || []).join(' + '));
+    if (res.translated_chars > preview.length) {
+      setResultNote(
+        `Showing the first ${preview.length.toLocaleString()} of ${res.translated_chars.toLocaleString()} translated characters. ` +
+        'The full translation is saved in History - use Export to get all of it.'
+      );
+    }
+    showToast(j.warnings?.length ? 'Saved with a warning - see the Output panel' : 'Document analyzed and saved',
+              j.warnings?.length ? 'info' : 'success');
+  };
+
+  const analyzeDocument = async () => {
+    if (!doc) return;
+    setLoading(true); resetResults();
+    setJob({ status: 'queued', stage: 'Starting', progress: 0 });
+    const ctl = { stop: false };
+    pollRef.current.stop = true;          // end any earlier poll loop
+    pollRef.current = ctl;
+    try {
+      const start = await axios.post(
+        `${BACKEND_URL}/api/documents/${doc.doc_id}/analyze`,
+        { source_lang: sourceLang, target_lang: targetLang }, authHeaders(),
+      );
+      const jobId: string = start.data.job_id;
+      jobIdRef.current = jobId;
+      let failures = 0;
+      while (!ctl.stop) {
+        await sleep(1500);
+        if (ctl.stop) return;
+        let j: any;
+        try {
+          j = (await axios.get(`${BACKEND_URL}/api/jobs/${jobId}`, authHeaders())).data;
+          failures = 0;
+        } catch (e: any) {
+          const code = e?.response?.status;
+          if (code === 404 || code === 401 || ++failures >= 5) throw e;   // gone, logged out, or server unreachable
+          continue;                                                        // brief network blip: try again
+        }
+        setJob({ status: j.status, stage: j.stage, progress: j.progress });
+        if (j.status === 'done')      { applyJobResult(j); return; }
+        if (j.status === 'error')     { showToast(j.error || 'Processing failed', 'error'); return; }
+        if (j.status === 'cancelled') { showToast('Cancelled', 'info'); return; }
+      }
+    } catch (err: any) {
+      if (err?.response?.status === 401) return;
+      const detail = err?.response?.data?.detail;
+      showToast(typeof detail === 'string' ? detail : 'Lost connection to the server', 'error');
+    } finally {
+      if (!ctl.stop) { setLoading(false); setJob(null); jobIdRef.current = ''; }
+    }
+  };
+
+  const cancelJob = () => {
+    if (!jobIdRef.current) return;
+    axios.post(`${BACKEND_URL}/api/jobs/${jobIdRef.current}/cancel`, {}, authHeaders()).catch(() => {});
+    setJob((j) => (j ? { ...j, stage: 'Cancelling…' } : j));
+  };
+
   const handleAnalyzeAndTranslate = async () => {
-    if (!inputText.trim()) { showToast('Please enter some text first', 'error'); return; }
+    if (doc) { await analyzeDocument(); return; }
+    if (!inputText.trim()) { showToast('Please enter some text first, or upload a file', 'error'); return; }
     setLoading(true);
-    setNerResults([]); setTranslationResult(''); setDetectedLang(''); setSaved(false);
+    setNerResults([]); setTranslationResult(''); setDetectedLang(''); setSaved(false); setSavedId(null);
+    setNerSummary(null); setResultNote(''); setJobWarnings([]); setEngineNote('');
 
     let srcLang = sourceLang === 'auto' ? 'en' : sourceLang;
     let nerEntities: any[] = [];
@@ -166,29 +360,43 @@ export default function HomeScreen() {
       if (sourceLang === 'auto') {
         try {
           const r = await axios.post(`${BACKEND_URL}/api/detect-language`, { text: inputText }, authHeaders());
-          srcLang = r.data.detected_language || 'en';
-        } catch { srcLang = 'en'; }
+          if (r.data.detected_language) {
+            srcLang = r.data.detected_language;
+          } else {
+            showToast('Could not detect the language - assuming English', 'info');
+          }
+        } catch {
+          showToast('Language detection failed - assuming English', 'info');
+        }
       }
       setDetectedLang(srcLang);
 
-      const nerRes = await axios.post(`${BACKEND_URL}/api/ner`, { text: inputText }, authHeaders());
-      nerEntities = nerRes.data.entities;
-      setNerResults(nerEntities);
+      // NER failure must not block translation / saving
+      try {
+        const nerRes = await axios.post(`${BACKEND_URL}/api/ner`, { text: inputText, lang: srcLang }, authHeaders());
+        nerEntities = nerRes.data.entities;
+        setNerResults(nerEntities);
+      } catch (nerErr: any) {
+        if (nerErr?.response?.status === 401) throw nerErr;
+        showToast(nerErr?.response?.data?.detail || 'Entity recognition failed - continuing without it', 'info');
+      }
 
       try {
         const transRes = await axios.post(`${BACKEND_URL}/api/translate`, {
           text: inputText, source_lang: srcLang, target_lang: targetLang,
         }, authHeaders());
         translatedText = transRes.data.translated_text;
+        setEngineNote(transRes.data.provider || '');
         setTranslationResult(translatedText ?? '');
       } catch (transErr: any) {
         showToast(transErr?.response?.data?.detail || `Translation to "${targetLang}" not available`, 'info');
       }
 
-      await axios.post(`${BACKEND_URL}/api/annotations`, {
+      const saveRes = await axios.post(`${BACKEND_URL}/api/annotations`, {
         original_text: inputText, translated_text: translatedText,
         ner_tags: JSON.stringify(nerEntities), source_lang: srcLang, target_lang: targetLang,
       }, authHeaders());
+      setSavedId(saveRes.data.id);
       setSaved(true);
       showToast(translatedText ? 'Annotation saved!' : 'Annotation saved (no translation)', 'success');
     } catch (err: any) {
@@ -199,14 +407,50 @@ export default function HomeScreen() {
   };
 
   const handleClear = () => {
-    setInputText(''); setNerResults([]); setTranslationResult('');
-    setDetectedLang(''); setSaved(false); setUploadedFileName('');
+    if (job) cancelJob();
+    removeDoc();
+    setInputText(''); setUploadedFileName('');
   };
 
-  const handleExport = (fmt: string) => {
+  const handleExport = async (fmt: string) => {
     setShowExportMenu(false);
-    if (!inputText && !translationResult) { showToast('Nothing to export yet', 'error'); return; }
-    const row = buildExportRow(inputText, translationResult, nerResults, detectedLang || sourceLang, targetLang);
+    if (!inputText && !translationResult && savedId === null) { showToast('Nothing to export yet', 'error'); return; }
+
+    if (fmt === 'conll' || fmt === 'jsonl') {
+      if (savedId !== null) {
+        try {
+          const res = await axios.get(`${BACKEND_URL}/api/export?format=${fmt}&annotation_id=${savedId}`, {
+            ...authHeaders(),
+            responseType: 'text',
+          });
+          const mimeType = fmt === 'jsonl' ? 'application/x-ndjson' : 'text/plain';
+          const ext = fmt === 'conll' ? 'conll' : 'jsonl';
+          triggerDownload(new Blob([res.data], { type: mimeType }), `annotation_${Date.now()}.${ext}`);
+          showToast(`Exported as ${fmt === 'conll' ? 'CoNLL / BIO' : 'JSONL'}`, 'success');
+          return;
+        } catch {
+          showToast(`Failed to export as ${fmt}`, 'error');
+          return;
+        }
+      }
+    }
+
+    // Prefer the saved server copy so the file matches what is in History even if the input box was edited
+    // after analysis; fall back to what is on screen if it was not saved or the fetch fails.
+    let row = buildExportRow(inputText, translationResult, nerResults, detectedLang || sourceLang, targetLang);
+    if (savedId !== null) {
+      try {
+        const res = await axios.get(`${BACKEND_URL}/api/annotations/${savedId}`, authHeaders());
+        const a = res.data;
+        let ner: any[] = [];
+        try { ner = a.ner_tags ? JSON.parse(a.ner_tags) : []; } catch { ner = []; }
+        row = buildExportRow(a.original_text, a.translated_text ?? '', ner, a.source_lang, a.target_lang);
+      } catch (err: any) {
+        if (err?.response?.status === 401) return; // session expired: the interceptor logs out
+        showToast('Could not load the saved copy - exporting what is on screen', 'info');
+      }
+    }
+
     doExport[fmt]?.(row);
     showToast(`Exported as .${fmt}`, 'success');
   };
@@ -247,41 +491,125 @@ export default function HomeScreen() {
           <View style={styles.cardHeader}>
             <Text style={styles.cardTitle}>Input</Text>
             <View style={styles.cardActions}>
-              <TouchableOpacity style={styles.iconBtn} onPress={() => copyText(inputText, 'Input copied!')}>
-                <Text style={styles.iconBtnText}>Copy</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconBtn} onPress={handleSaveInput}>
-                <Text style={styles.iconBtnText}>Save</Text>
-              </TouchableOpacity>
+              {!doc ? (
+                <>
+                  <TouchableOpacity style={styles.iconBtn} onPress={() => copyText(inputText, 'Input copied!')}>
+                    <Text style={styles.iconBtnText}>Copy</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.iconBtn} onPress={handleSaveInput}>
+                    <Text style={styles.iconBtnText}>Save</Text>
+                  </TouchableOpacity>
+                </>
+              ) : null}
               {Platform.OS === 'web' ? (
-                <TouchableOpacity style={[styles.iconBtn, styles.iconBtnPrimary]} onPress={triggerFileInput}>
-                  <Text style={styles.iconBtnTextPrimary}>Upload File</Text>
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity
+                    style={[styles.iconBtn, styles.iconBtnPrimary, (uploading || loading || bulkUploading) && styles.btnDisabled]}
+                    onPress={triggerFileInput}
+                    disabled={uploading || loading || bulkUploading}
+                  >
+                    <Text style={styles.iconBtnTextPrimary}>Upload File</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.iconBtn, styles.iconBtnPrimary, (uploading || loading || bulkUploading) && styles.btnDisabled]}
+                    onPress={triggerBulkFileInput}
+                    disabled={uploading || loading || bulkUploading}
+                  >
+                    <Text style={styles.iconBtnTextPrimary}>{bulkUploading ? 'Uploading…' : 'Bulk Upload'}</Text>
+                  </TouchableOpacity>
+                </>
               ) : null}
             </View>
           </View>
 
-          {uploadedFileName ? (
-            <View style={styles.fileTag}>
-              <Text style={styles.fileTagText}>{uploadedFileName}</Text>
+          {bulkUploading ? (
+            <View style={styles.docCard}>
+              <Text style={styles.docName}>Uploading multiple files…</Text>
+              <Text style={styles.docMeta}>Please wait while files are being processed</Text>
             </View>
-          ) : null}
+          ) : bulkResults ? (
+            <View style={styles.docCard}>
+              <View style={styles.docHeader}>
+                <Text style={styles.docName}>Bulk Upload Complete</Text>
+                <TouchableOpacity onPress={() => setBulkResults(null)}>
+                  <Text style={styles.docRemove}>Dismiss</Text>
+                </TouchableOpacity>
+              </View>
+              {bulkResults.uploaded.length > 0 && (
+                <Text style={styles.docMeta}>
+                  {bulkResults.uploaded.length} file{bulkResults.uploaded.length !== 1 ? 's' : ''} ready:{' '}
+                  {bulkResults.uploaded.map(d => d.filename).join(', ')}
+                </Text>
+              )}
+              {bulkResults.errors.length > 0 && (
+                <Text style={[styles.docMeta, { color: '#dc2626' }]}>
+                  {bulkResults.errors.length} failed:{' '}
+                  {bulkResults.errors.map(e => `${e.filename} (${e.error})`).join('; ')}
+                </Text>
+              )}
+              <Text style={styles.docHint}>
+                First file selected. Click Analyze &amp; Translate to process it, then switch between files if needed.
+              </Text>
+            </View>
+          ) : uploading ? (
+            <View style={styles.docCard}>
+              <Text style={styles.docName}>{uploadPct < 100 ? `Uploading… ${uploadPct}%` : 'Reading the document…'}</Text>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${Math.max(3, uploadPct)}%` }]} />
+              </View>
+              <Text style={styles.docMeta}>
+                {uploadPct < 100 ? 'Sending the file to the server' : 'Extracting text - large PDFs can take a minute'}
+              </Text>
+            </View>
+          ) : doc ? (
+            <View style={styles.docCard}>
+              <View style={styles.docHeader}>
+                <Text style={styles.docName} numberOfLines={1}>{doc.filename}</Text>
+                <TouchableOpacity onPress={removeDoc} disabled={loading}>
+                  <Text style={[styles.docRemove, loading && styles.btnDisabled]}>Remove</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.docMeta}>
+                {[
+                  fmtSize(doc.size),
+                  `${doc.chars.toLocaleString()} characters`,
+                  `${doc.words.toLocaleString()} words`,
+                  ...Object.entries(doc.info || {})
+                    .filter(([k, v]) => INFO_LABEL[k] && v)
+                    .map(([k, v]) => `${v.toLocaleString()} ${INFO_LABEL[k]}`),
+                ].join(' · ')}
+              </Text>
+              <Text style={styles.docPreviewLabel}>Preview</Text>
+              <Text style={styles.docPreview} numberOfLines={7}>{doc.preview}</Text>
+              <Text style={styles.docHint}>
+                The whole document is analyzed and translated when you press Analyze & Translate.
+              </Text>
+            </View>
+          ) : (
+            <>
+              {uploadedFileName ? (
+                <View style={styles.fileTag}>
+                  <Text style={styles.fileTagText}>{uploadedFileName}</Text>
+                </View>
+              ) : null}
 
-          <TextInput
-            style={styles.input}
-            multiline
-            numberOfLines={8}
-            placeholder="Type, paste, or upload a file..."
-            placeholderTextColor="#b0b8c9"
-            value={inputText}
-            onChangeText={setInputText}
-          />
+              <TextInput
+                style={styles.input}
+                multiline
+                numberOfLines={8}
+                placeholder="Type or paste text, or upload a file (PDF, Word, Excel, PowerPoint, CSV, TXT…)"
+                placeholderTextColor="#b0b8c9"
+                value={inputText}
+                onChangeText={setInputText}
+              />
+            </>
+          )}
 
           {/* Source Language */}
           <Text style={styles.langSectionLabel}>Source Language</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.langScroll}>
             <View style={styles.langRow}>
-              {SOURCE_LANGUAGES.map((lang) => (
+              {sourceLanguages.map((lang) => (
                 <TouchableOpacity
                   key={lang.code}
                   style={[styles.langChip, sourceLang === lang.code && styles.langChipActive]}
@@ -289,6 +617,7 @@ export default function HomeScreen() {
                 >
                   <Text style={[styles.langChipText, sourceLang === lang.code && styles.langChipTextActive]}>
                     {lang.name}
+                    {badgeFor(langTable, lang.code) ? <Text style={styles.langBadge}>{'  ' + badgeFor(langTable, lang.code)}</Text> : null}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -299,7 +628,7 @@ export default function HomeScreen() {
           <Text style={styles.langSectionLabel}>Target Language</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.langScroll}>
             <View style={styles.langRow}>
-              {TARGET_LANGUAGES.map((lang) => (
+              {targetLanguages.map((lang) => (
                 <TouchableOpacity
                   key={lang.code}
                   style={[styles.langChip, targetLang === lang.code && styles.langChipActive]}
@@ -307,23 +636,54 @@ export default function HomeScreen() {
                 >
                   <Text style={[styles.langChipText, targetLang === lang.code && styles.langChipTextActive]}>
                     {lang.name}
+                    {badgeFor(langTable, lang.code) ? <Text style={styles.langBadge}>{'  ' + badgeFor(langTable, lang.code)}</Text> : null}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
           </ScrollView>
 
+          {(() => {
+            const noteSource = sourceLang === 'auto' ? detectedLang : sourceLang;
+            const note = [languageNote(langTable, noteSource, 'source'), languageNote(langTable, targetLang, 'target')].filter(Boolean).join(' ');
+            return note ? <Text style={styles.langNote}>{note}</Text> : null;
+          })()}
+
           {/* Action Buttons */}
           <View style={styles.btnRow}>
-            <TouchableOpacity style={styles.primaryBtn} onPress={handleAnalyzeAndTranslate} disabled={loading}>
-              <Text style={styles.primaryBtnText}>{loading ? 'Analyzing...' : 'Analyze & Translate'}</Text>
+            <TouchableOpacity
+              style={[styles.primaryBtn, (loading || uploading) && styles.btnDisabled]}
+              onPress={handleAnalyzeAndTranslate}
+              disabled={loading || uploading}
+            >
+              <Text style={styles.primaryBtnText}>
+                {job ? `Processing ${Math.round(job.progress * 100)}%` : loading ? 'Analyzing...' : 'Analyze & Translate'}
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.ghostBtn} onPress={handleClear}>
+            <TouchableOpacity style={styles.ghostBtn} onPress={handleClear} disabled={uploading}>
               <Text style={styles.ghostBtnText}>Clear</Text>
             </TouchableOpacity>
           </View>
 
-          {loading ? <ActivityIndicator size="large" color="#1a73e8" style={{ marginTop: 14 }} /> : null}
+          {job ? (
+            <View style={styles.progressWrap}>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${Math.max(3, Math.round(job.progress * 100))}%` }]} />
+              </View>
+              <View style={styles.progressRow}>
+                <Text style={styles.progressText}>{job.stage}</Text>
+                <TouchableOpacity onPress={cancelJob}>
+                  <Text style={styles.progressCancel}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.docHint}>Large documents can take several minutes. You can leave this page open and keep working.</Text>
+            </View>
+          ) : loading ? (
+            <>
+              <ActivityIndicator size="large" color="#7c3aed" style={{ marginTop: 14 }} />
+              <Text style={styles.docHint}>Offline translation models download on first use and can take a few minutes.</Text>
+            </>
+          ) : null}
         </View>
 
         {/* RIGHT - OUTPUT */}
@@ -340,9 +700,9 @@ export default function HomeScreen() {
                 </TouchableOpacity>
                 {showExportMenu ? (
                   <View style={styles.exportMenu}>
-                    {EXPORT_FORMATS.map((fmt) => (
-                      <TouchableOpacity key={fmt} style={styles.exportMenuItem} onPress={() => handleExport(fmt)}>
-                        <Text style={styles.exportMenuText}>{`.${fmt.toUpperCase()}`}</Text>
+                    {EXPORT_OPTIONS.map((opt) => (
+                      <TouchableOpacity key={opt.key} style={styles.exportMenuItem} onPress={() => handleExport(opt.key)}>
+                        <Text style={styles.exportMenuText}>{opt.label}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -360,13 +720,20 @@ export default function HomeScreen() {
             </View>
           ) : null}
 
-          {!hasResults && !loading ? (
+          {/* Job warnings (e.g. translation unavailable) stay visible even when there is no translation to show */}
+          {jobWarnings.length > 0 ? (
+            <View style={styles.warningBox}>
+              {jobWarnings.map((w, i) => <Text key={i} style={styles.warningBoxText}>{w}</Text>)}
+            </View>
+          ) : null}
+
+          {!hasResults && !loading && jobWarnings.length === 0 ? (
             <View style={styles.emptyOutput}>
               <View style={styles.emptyOutputIcon}>
                 <Text style={styles.emptyOutputIconText}>O</Text>
               </View>
               <Text style={styles.emptyOutputTitle}>No output yet</Text>
-              <Text style={styles.emptyOutputSub}>Enter text on the left and click Analyze & Translate</Text>
+              <Text style={styles.emptyOutputSub}>Enter text or upload a document on the left and click Analyze & Translate</Text>
             </View>
           ) : null}
 
@@ -382,6 +749,8 @@ export default function HomeScreen() {
               <View style={styles.translationBox}>
                 <Text style={styles.translationText}>{translationResult}</Text>
               </View>
+              {engineNote ? <Text style={styles.resultNote}>{`Translated with: ${engineNote}`}</Text> : null}
+              {resultNote ? <Text style={styles.resultNote}>{resultNote}</Text> : null}
               {saved ? <Text style={styles.savedBadge}>Saved to database</Text> : null}
             </View>
           ) : null}
@@ -392,9 +761,16 @@ export default function HomeScreen() {
               <View style={styles.resultBlockHeader}>
                 <Text style={styles.resultBlockTitle}>Named Entities</Text>
                 <View style={styles.nerCountBadge}>
-                  <Text style={styles.nerCountText}>{nerResults.length}</Text>
+                  <Text style={styles.nerCountText}>
+                    {nerSummary ? `${nerSummary.unique.toLocaleString()} unique · ${nerSummary.total.toLocaleString()} total` : nerResults.length}
+                  </Text>
                 </View>
               </View>
+              {nerSummary && nerSummary.unique > nerResults.length ? (
+                <Text style={styles.resultNote}>
+                  Showing the {nerResults.length} most frequent of {nerSummary.unique.toLocaleString()} unique entities. Export for the full list.
+                </Text>
+              ) : null}
               <View style={styles.legend}>
                 {Object.entries(NER_COLORS).map(([k, v]) => (
                   <View key={k} style={styles.legendItem}>
@@ -412,6 +788,7 @@ export default function HomeScreen() {
                       <View style={[styles.nerBadge, { backgroundColor: color.text }]}>
                         <Text style={styles.nerBadgeText}>{color.label}</Text>
                       </View>
+                      {entity.count > 1 ? <Text style={styles.nerCount}>{`×${entity.count}`}</Text> : null}
                       <Text style={styles.nerScore}>{(entity.score * 100).toFixed(0)}%</Text>
                     </View>
                   );
@@ -474,7 +851,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   langBannerValueTarget: {
-    color: '#1a73e8',
+    color: '#7c3aed',
   },
   langBannerArrow: {
     fontSize: 18,
@@ -541,25 +918,25 @@ const styles = StyleSheet.create({
   iconBtn: {
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 6,
-    backgroundColor: '#f0f2f5',
-    borderWidth: 1,
-    borderColor: '#e2e5ed',
+    borderRadius: 8,
+    backgroundColor: '#F3F2FF',
+    borderWidth: 1.5,
+    borderColor: '#EDE9FE',
     marginLeft: 6,
   },
   iconBtnText: {
     fontSize: 12,
-    color: '#555',
+    color: '#7c3aed',
     fontWeight: '600',
   },
   iconBtnPrimary: {
-    backgroundColor: '#e8f0fe',
-    borderColor: '#1a73e8',
+    backgroundColor: '#EDE9FE',
+    borderColor: '#c4b5fd',
   },
   iconBtnTextPrimary: {
     fontSize: 12,
-    color: '#1a73e8',
-    fontWeight: '600',
+    color: '#6d28d9',
+    fontWeight: '700',
   },
 
   fileTag: {
@@ -603,9 +980,13 @@ const styles = StyleSheet.create({
   },
   langScroll: {
     marginBottom: 4,
+    // a horizontal ScrollView grows by default on web; without this it absorbs the card's extra height
+    flexGrow: 0,
+    flexShrink: 0,
   },
   langRow: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
   },
   langChip: {
     paddingVertical: 6,
@@ -617,16 +998,32 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   langChipActive: {
-    backgroundColor: '#e8f0fe',
-    borderColor: '#1a73e8',
+    backgroundColor: '#EDE9FE',
+    borderColor: '#7c3aed',
   },
   langChipText: {
     fontSize: 12,
     color: '#555',
     fontWeight: '500',
   },
+  langBadge: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#b45309',
+  },
+  langNote: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#92400e',
+    backgroundColor: '#fffbeb',
+    borderColor: '#fcd34d',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 8,
+  },
   langChipTextActive: {
-    color: '#1a73e8',
+    color: '#7c3aed',
     fontWeight: '700',
   },
 
@@ -637,28 +1034,33 @@ const styles = StyleSheet.create({
   },
   primaryBtn: {
     flex: 1,
-    backgroundColor: '#1a73e8',
-    borderRadius: 10,
-    paddingVertical: 13,
+    backgroundColor: '#7c3aed',
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: 'center',
     marginRight: 8,
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
   },
   primaryBtnText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '700',
+    letterSpacing: 0.2,
   },
   ghostBtn: {
     backgroundColor: '#fff',
-    borderRadius: 10,
-    paddingVertical: 13,
+    borderRadius: 12,
+    paddingVertical: 14,
     paddingHorizontal: 18,
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: '#e2e5ed',
+    borderColor: '#EDE9FE',
   },
   ghostBtnText: {
-    color: '#555',
+    color: '#7c3aed',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -753,11 +1155,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   translationBox: {
-    backgroundColor: '#f0f4ff',
-    borderRadius: 8,
+    backgroundColor: '#EDE9FE',
+    borderRadius: 10,
     padding: 14,
     borderLeftWidth: 3,
-    borderLeftColor: '#1a73e8',
+    borderLeftColor: '#7c3aed',
   },
   translationText: {
     fontSize: 15,
@@ -773,11 +1175,40 @@ const styles = StyleSheet.create({
 
   // NER
   nerCountBadge: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#7c3aed',
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
+  btnDisabled: { opacity: 0.5 },
+
+  // Uploaded document card
+  docCard: {
+    borderWidth: 1.5, borderColor: '#c7d7f5', backgroundColor: '#f5f8ff', borderRadius: 10, padding: 14,
+  },
+  docHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  docName: { fontSize: 14, fontWeight: '700', color: '#1a1f36', flex: 1, marginRight: 10 },
+  docRemove: { fontSize: 12, fontWeight: '700', color: '#dc2626' },
+  docMeta: { fontSize: 12, color: '#6b7280', marginTop: 4 },
+  docPreviewLabel: {
+    fontSize: 10, fontWeight: '700', color: '#8b92a9', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 12, marginBottom: 4,
+  },
+  docPreview: { fontSize: 13, color: '#374151', lineHeight: 19 },
+  docHint: { fontSize: 11, color: '#8b92a9', marginTop: 10 },
+
+  // Progress
+  progressWrap: { marginTop: 14 },
+  progressTrack: { height: 8, borderRadius: 4, backgroundColor: '#EDE9FE', overflow: 'hidden', marginTop: 8 },
+  progressFill: { height: 8, borderRadius: 4, backgroundColor: '#7c3aed' },
+  progressRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
+  progressText: { fontSize: 12, color: '#6d28d9', fontWeight: '600', flex: 1 },
+  progressCancel: { fontSize: 12, color: '#ec4899', fontWeight: '700' },
+
+  resultNote: { fontSize: 12, color: '#6b7280', marginTop: 8, lineHeight: 17 },
+  warningBox: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', borderRadius: 8, padding: 10, marginBottom: 14 },
+  warningBoxText: { fontSize: 12, color: '#92400e', lineHeight: 18 },
+  nerCount: { fontSize: 11, color: '#374151', fontWeight: '700', marginRight: 8 },
+
   nerCountText: {
     color: '#fff',
     fontSize: 11,
@@ -850,10 +1281,10 @@ const styles = StyleSheet.create({
     overflow: 'visible' as any,
   },
   exportDropBtn: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#7c3aed',
     paddingHorizontal: 14,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 10,
   },
   exportDropBtnText: {
     color: '#fff',

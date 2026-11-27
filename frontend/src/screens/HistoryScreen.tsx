@@ -6,21 +6,22 @@ import {
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../context/AuthContext';
+import { exportPdf } from '../utils/pdfExport';
+import { parseEntities, entitiesToJson, entitiesToText } from '../utils/entities';
+import { makeSheet } from '../utils/xlsxSafe';
 
-const BACKEND_URL = Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://127.0.0.1:8000';
+import { BACKEND_URL } from '../config';
+import { LANGUAGE_NAMES } from '../utils/languages';
 
 const NER_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   PER:  { bg: '#e3f2fd', text: '#1565c0', label: 'Person' },
   ORG:  { bg: '#e8f5e9', text: '#2e7d32', label: 'Organization' },
   LOC:  { bg: '#fff3e0', text: '#e65100', label: 'Location' },
   MISC: { bg: '#f3e5f5', text: '#6a1b9a', label: 'Miscellaneous' },
+  DATE: { bg: '#e0f7fa', text: '#00695c', label: 'Date' },
 };
 
-const LANG_NAMES: Record<string, string> = {
-  en: 'English', hi: 'Hindi', fr: 'French',
-  es: 'Spanish', de: 'German', zh: 'Chinese',
-  ar: 'Arabic', ja: 'Japanese', ru: 'Russian',
-};
+const LANG_NAMES: Record<string, string> = LANGUAGE_NAMES;
 
 function Toast({ message, type }: { message: string; type: 'success' | 'error' | 'info' }) {
   const colors = { success: '#2e7d32', error: '#c62828', info: '#1565c0' };
@@ -38,12 +39,17 @@ interface Annotation {
   ner_tags: string | null;
   source_lang: string;
   target_lang: string;
+  source_name?: string | null;   // uploaded file name, if the annotation came from a document
+  truncated?: boolean;           // the list view clipped a very long document
 }
+
+const MAX_ENTITIES_SHOWN = 200;
 
 // ----------------------------------------------------------------
 // Export helpers
 // ----------------------------------------------------------------
 function triggerDownload(blob: Blob, filename: string) {
+  if (typeof document === 'undefined') return;
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -52,14 +58,16 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function buildRows(annotations: Annotation[]) {
+// readable=true lists entities one per line (txt/pdf); otherwise a clean JSON string (json/csv/xlsx/xml)
+function buildRows(annotations: Annotation[], readable = false) {
   return annotations.map((a) => ({
     id: String(a.id),
+    source_name: a.source_name ?? '',
     original_text: a.original_text,
     translated_text: a.translated_text ?? '',
     source_lang: LANG_NAMES[a.source_lang] || a.source_lang,
     target_lang: LANG_NAMES[a.target_lang] || a.target_lang,
-    ner_tags: a.ner_tags ?? '',
+    ner_tags: readable ? entitiesToText(a.ner_tags) : entitiesToJson(a.ner_tags),
   }));
 }
 
@@ -80,14 +88,14 @@ function exportCSV(annotations: Annotation[]) {
 }
 
 function exportExcel(annotations: Annotation[]) {
-  const ws = XLSX.utils.json_to_sheet(buildRows(annotations));
+  const ws = makeSheet(buildRows(annotations));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Annotations');
   XLSX.writeFile(wb, `annotations_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 function exportTXT(annotations: Annotation[]) {
-  const lines = buildRows(annotations).map((r, i) =>
+  const lines = buildRows(annotations, true).map((r, i) =>
     `--- Record ${i + 1} ---\n` + Object.entries(r).map(([k, v]) => `${k}: ${v}`).join('\n')
   );
   const blob = new Blob([lines.join('\n\n')], { type: 'text/plain' });
@@ -108,23 +116,20 @@ function exportXML(annotations: Annotation[]) {
   triggerDownload(blob, `annotations_${new Date().toISOString().slice(0, 10)}.xml`);
 }
 
-function exportPDF(annotations: Annotation[]) {
-  const rows = buildRows(annotations);
-  const allLines: string[] = [];
-  rows.forEach((r, i) => {
-    allLines.push(`--- Record ${i + 1} ---`);
-    Object.entries(r).forEach(([k, v]) => allLines.push(`${k}: ${v}`));
-    allLines.push('');
-  });
-  const escaped = allLines
-    .slice(0, 40) // PDF height limit
-    .map((l) => l.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)'))
-    .map((l, i) => `BT /F1 9 Tf 30 ${750 - i * 14} Td (${l}) Tj ET`)
-    .join('\n');
-  const content = `%PDF-1.4\n1 0 obj<</Type /Catalog /Pages 2 0 R>>endobj\n2 0 obj<</Type /Pages /Kids[3 0 R] /Count 1>>endobj\n3 0 obj<</Type /Page /Parent 2 0 R /MediaBox[0 0 612 792] /Contents 4 0 R /Resources<</Font<</F1<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>>>>>endobj\n4 0 obj<</Length ${escaped.length}>>\nstream\n${escaped}\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \nttrailer<</Size 5 /Root 1 0 R>>\nstartxref\n0\n%%EOF`;
-  const blob = new Blob([content], { type: 'application/pdf' });
-  triggerDownload(blob, `annotations_${new Date().toISOString().slice(0, 10)}.pdf`);
+function exportPDF(annotations: Annotation[]): boolean {
+  return exportPdf('Annotations', buildRows(annotations, true));
 }
+
+const EXPORT_OPTIONS: { key: string; label: string }[] = [
+  { key: 'json',  label: '.JSON' },
+  { key: 'csv',   label: '.CSV' },
+  { key: 'xlsx',  label: '.XLSX' },
+  { key: 'txt',   label: '.TXT' },
+  { key: 'xml',   label: '.XML' },
+  { key: 'pdf',   label: '.PDF' },
+  { key: 'conll', label: 'CoNLL / BIO' },
+  { key: 'jsonl', label: 'JSONL' },
+];
 
 // ----------------------------------------------------------------
 // Main Component
@@ -160,58 +165,99 @@ export default function HistoryScreen() {
     fetchAnnotations();
   }, [fetchAnnotations]);
 
-  const handleDelete = (id: number) => {
-    Alert.alert(
-      'Delete Annotation',
-      'Are you sure you want to delete this annotation? This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete', style: 'destructive',
-          onPress: async () => {
-            try {
-              await axios.delete(`${BACKEND_URL}/api/annotations/${id}`, authHeaders());
-              setAnnotations(prev => prev.filter(a => a.id !== id));
-              if (expanded === id) setExpanded(null);
-              showToast('Annotation deleted', 'success');
-            } catch {
-              showToast('Failed to delete annotation', 'error');
-            }
-          },
-        },
-      ]
-    );
+  const deleteAnnotation = async (id: number) => {
+    try {
+      await axios.delete(`${BACKEND_URL}/api/annotations/${id}`, authHeaders());
+      setAnnotations(prev => prev.filter(a => a.id !== id));
+      if (expanded === id) setExpanded(null);
+      showToast('Annotation deleted', 'success');
+    } catch {
+      showToast('Failed to delete annotation', 'error');
+    }
   };
 
-  const handleExport = (format: string) => {
+  const handleDelete = (id: number) => {
+    const message = 'Are you sure you want to delete this annotation? This cannot be undone.';
+    // Alert.alert with buttons is a no-op on react-native-web, so use window.confirm there
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm(message)) deleteAnnotation(id);
+      return;
+    }
+    Alert.alert('Delete Annotation', message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => deleteAnnotation(id) },
+    ]);
+  };
+
+  const handleExport = async (format: string) => {
     setShowExportMenu(false);
-    if (!annotations.length) {
+
+    if (format === 'conll' || format === 'jsonl') {
+      try {
+        const res = await axios.get(`${BACKEND_URL}/api/export?format=${format}`, {
+          ...authHeaders(),
+          responseType: 'text',
+        });
+        if (!res.data || !res.data.trim()) {
+          showToast('No annotations to export', 'error');
+          return;
+        }
+        const mimeType = format === 'jsonl' ? 'application/x-ndjson' : 'text/plain';
+        const ext = format === 'conll' ? 'conll' : 'jsonl';
+        triggerDownload(new Blob([res.data], { type: mimeType }), `annotations_${new Date().toISOString().slice(0, 10)}.${ext}`);
+        showToast(`Exported annotations as ${format === 'conll' ? 'CoNLL / BIO' : 'JSONL'}`, 'success');
+      } catch {
+        showToast(`Failed to export as ${format}`, 'error');
+      }
+      return;
+    }
+
+    // Export every saved annotation from the server (the list view only holds the first page)
+    let all: Annotation[];
+    try {
+      const res = await axios.get(`${BACKEND_URL}/api/export`, authHeaders());
+      all = res.data.map((r: any) => ({
+        id: r.id,
+        original_text: r.original_text,
+        translated_text: r.translated_text ?? null,
+        // /api/export returns ner_tags as an array; the row builders expect a JSON string
+        ner_tags: Array.isArray(r.ner_tags) && r.ner_tags.length ? JSON.stringify(r.ner_tags) : null,
+        source_lang: r.source_lang,
+        target_lang: r.target_lang,
+        source_name: r.source_name ?? null,
+      }));
+    } catch {
+      showToast('Failed to fetch annotations for export', 'error');
+      return;
+    }
+
+    if (!all.length) {
       showToast('No annotations to export', 'error');
       return;
     }
     switch (format) {
-      case 'json':  exportJSON(annotations);  break;
-      case 'csv':   exportCSV(annotations);   break;
-      case 'xlsx':  exportExcel(annotations); break;
-      case 'txt':   exportTXT(annotations);   break;
-      case 'xml':   exportXML(annotations);   break;
-      case 'pdf':   exportPDF(annotations);   break;
+      case 'json':  exportJSON(all);  break;
+      case 'csv':   exportCSV(all);   break;
+      case 'xlsx':  exportExcel(all); break;
+      case 'txt':   exportTXT(all);   break;
+      case 'xml':   exportXML(all);   break;
+      case 'pdf':
+        if (!exportPDF(all)) {
+          showToast('Allow pop-ups to export as PDF', 'error');
+          return;
+        }
+        break;
     }
-    showToast(`Exported as .${format}`, 'success');
+    showToast(`Exported ${all.length} annotation${all.length !== 1 ? 's' : ''} as .${format}`, 'success');
   };
 
   const getNerColor = (entityGroup: string) =>
     NER_COLORS[entityGroup] || { bg: '#fce4ec', text: '#880e4f', label: entityGroup };
 
-  const parseNerTags = (nerTags: string | null) => {
-    if (!nerTags) return [];
-    try { return JSON.parse(nerTags); } catch { return []; }
-  };
+  const parseNerTags = (nerTags: string | null) => parseEntities(nerTags);
 
   return (
     <View style={styles.root}>
-      {toast && <Toast message={toast.msg} type={toast.type} />}
-
       {/* Action Bar */}
       <View style={styles.actionBar}>
         <TouchableOpacity style={styles.refreshBtn} onPress={fetchAnnotations}>
@@ -224,23 +270,26 @@ export default function HistoryScreen() {
             style={styles.exportBtn}
             onPress={() => setShowExportMenu(!showExportMenu)}
           >
-            <Text style={styles.exportBtnText}>Export  v</Text>
+            <Text style={styles.exportBtnText}>{`Export  ${showExportMenu ? '▲' : '▼'}`}</Text>
           </TouchableOpacity>
           {showExportMenu && (
             <View style={styles.exportMenu}>
-              {['json', 'csv', 'xlsx', 'txt', 'xml', 'pdf'].map((fmt) => (
+              {EXPORT_OPTIONS.map((opt) => (
                 <TouchableOpacity
-                  key={fmt}
+                  key={opt.key}
                   style={styles.exportMenuItem}
-                  onPress={() => handleExport(fmt)}
+                  onPress={() => handleExport(opt.key)}
                 >
-                  <Text style={styles.exportMenuText}>.{fmt.toUpperCase()}</Text>
+                  <Text style={styles.exportMenuText}>{opt.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           )}
         </View>
       </View>
+
+      {/* Status / Success Toast Message */}
+      {toast && <Toast message={toast.msg} type={toast.type} />}
 
       {/* Count */}
       {annotations.length > 0 && (
@@ -281,6 +330,9 @@ export default function HistoryScreen() {
                             <Text style={styles.arrow}>→</Text>
                             <Text style={styles.langBadge}>{LANG_NAMES[item.target_lang] || item.target_lang}</Text>
                           </View>
+                          {item.source_name ? (
+                            <Text style={styles.fileBadge} numberOfLines={1}>{item.source_name}</Text>
+                          ) : null}
                         </View>
                         <Text style={styles.expandIcon}>{isExpanded ? '▲' : '▼'}</Text>
                       </View>
@@ -292,6 +344,12 @@ export default function HistoryScreen() {
 
                     {isExpanded && (
                       <View style={styles.expandedContent}>
+                        {item.truncated ? (
+                          <Text style={styles.truncNote}>
+                            This is a long document, so only the beginning is shown here. Use Export to get the complete text and every entity.
+                          </Text>
+                        ) : null}
+
                         {/* Translation */}
                         {item.translated_text ? (
                           <View style={styles.section}>
@@ -303,9 +361,11 @@ export default function HistoryScreen() {
                         {/* NER Tags */}
                         {nerTags.length > 0 ? (
                           <View style={styles.section}>
-                            <Text style={styles.sectionLabel}>Entities ({nerTags.length})</Text>
+                            <Text style={styles.sectionLabel}>
+                              Entities ({nerTags.length > MAX_ENTITIES_SHOWN ? `first ${MAX_ENTITIES_SHOWN} of ${nerTags.length}` : nerTags.length}{item.truncated ? '+' : ''})
+                            </Text>
                             <View style={styles.nerGrid}>
-                              {nerTags.map((entity: any, i: number) => {
+                              {nerTags.slice(0, MAX_ENTITIES_SHOWN).map((entity: any, i: number) => {
                                 const color = getNerColor(entity.entity_group);
                                 return (
                                   <View key={i} style={[styles.nerTag, { backgroundColor: color.bg, borderColor: color.text }]}>
@@ -452,6 +512,25 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 8,
   },
+  fileBadge: {
+    fontSize: 11,
+    color: '#1a73e8',
+    fontWeight: '600',
+    backgroundColor: '#e8f0fe',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    maxWidth: 220,
+  },
+  truncNote: {
+    fontSize: 12,
+    color: '#b45309',
+    backgroundColor: '#fffbeb',
+    padding: 8,
+    borderRadius: 6,
+    marginBottom: 10,
+    lineHeight: 17,
+  },
   langBadges: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -569,18 +648,18 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   toast: {
-    position: 'absolute',
-    top: 10,
-    left: 12,
-    right: 12,
-    zIndex: 999,
-    padding: 14,
+    marginHorizontal: 12,
+    marginBottom: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   toastText: {
     color: '#fff',
     fontWeight: '700',
     fontSize: 14,
+    textAlign: 'center',
   },
 });

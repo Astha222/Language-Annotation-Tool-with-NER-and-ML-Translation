@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 
 interface AuthContextType {
   token: string | null;
@@ -42,6 +43,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await AsyncStorage.removeItem('auth_token');
     await AsyncStorage.removeItem('auth_user');
   };
+
+  // Expired/invalid token: any 401 from an authenticated request logs the user out
+  useEffect(() => {
+    const id = axios.interceptors.response.use(
+      (res) => res,
+      (err) => {
+        const url: string = err?.config?.url || '';
+        if (err?.response?.status === 401 && token && !url.includes('/api/auth/login')) {
+          logout();
+        }
+        return Promise.reject(err);
+      }
+    );
+    return () => axios.interceptors.response.eject(id);
+  }, [token]);
 
   return (
     <AuthContext.Provider value={{ token, user, login, logout, isLoading }}>

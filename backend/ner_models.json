@@ -1,0 +1,57 @@
+{
+  "_about": "Registry of the entity-recognition (NER) models. 'models' lists what is available, 'routes' says which model each language uses. To change a default, change one line in 'routes'. To add a model (for example your own fine-tuned one), add an entry under 'models' (in this file, or in your own file named by NER_MODELS_FILE). See 'Changing or adding an NER model' in README.md.",
+  "models": {
+    "english-b-nofin": {
+      "source": "muskan-424/distilroberta-ner-english-b-nofin",
+      "fallback": "english-bert-base",
+      "licence": "Apache-2.0 (distilroberta-base); trained on CoNLL-2003, WNUT-2017, BTC (no FIN)",
+      "labels": ["PER", "ORG", "LOC", "MISC"],
+      "evidence": "English-EWT strict F1 0.762 +- 0.009 over 3 seeds (bert-base 0.703); evaluation/RESULTS.md, WS2b",
+      "note": "Mentor decision D1 (2026-11-25): best measured English model, so the English default. If these weights cannot be loaded (not published yet, no internet) the app falls back to 'fallback' and says so in the log and in GET /health/models."
+    },
+    "english-bert-base": {
+      "source": "dslim/bert-base-NER",
+      "licence": "MIT",
+      "labels": ["PER", "ORG", "LOC", "MISC"],
+      "evidence": "English-EWT strict F1 0.703",
+      "note": "The previous English default; also the fallback for english-b-nofin."
+    },
+    "indic-indicbert-hi": {
+      "source": "neuronsbyisshu/indicbert-hi-ner-naamapadam",
+      "licence": "CC0-1.0",
+      "labels": ["PER", "ORG", "LOC"],
+      "evidence": "Hindi strict F1 0.827 (Naamapadam gold); 0.73-0.85 on the other eight Indian languages; evaluation/RESULTS.md",
+      "note": "Used for Hindi and eight other Indian languages (INDIC_NER_LANGS in main.py)."
+    },
+    "multi-davlan-wikiann": {
+      "source": "Davlan/xlm-roberta-base-wikiann-ner",
+      "licence": "none declared on the model card (so it cannot be released with the project)",
+      "labels": ["PER", "ORG", "LOC"],
+      "evidence": "ru 0.49, ar 0.49, ja 0.35, de 0.51, zh 0.46",
+      "note": "The previous default for every other language, replaced by multi-davlan-hrl (decision D2(a)). Kept only so that old results can be reproduced: NER_MODEL_MULTI=multi-davlan-wikiann."
+    },
+    "multi-davlan-hrl": {
+      "source": "Davlan/xlm-roberta-base-ner-hrl",
+      "licence": "AFL-3.0",
+      "labels": ["PER", "ORG", "LOC"],
+      "evidence": "ru 0.74, ar 0.81, ja 0.64, de 0.82, zh 0.78 (+0.25 to +0.32 over the previous model on every human-labelled set); weaker on lower-case text (es 0.36, de 0.44, fr 0.46)",
+      "note": "Default for every language that has no model of its own (decision D2(a), 2026-11-25): fr, es, de, ru, zh, ar, ja and the rest."
+    },
+    "multi-otter": {
+      "source": "whoisjones/otter-cross-mmbert",
+      "loader": "otter",
+      "trust_remote_code": true,
+      "revision": "8729188e4f5fc7948d0e9dfd7d7e6d36c2e7270d",
+      "threshold": 0.25,
+      "licence": "Apache-2.0",
+      "labels": ["PER", "ORG", "LOC"],
+      "evidence": "best on lower-case text: es 0.70, fr 0.69, de 0.64, zh 0.65 (hrl_base 0.36, 0.46, 0.44, 0.53); weaker on cased ru 0.63 and de 0.78 (hrl_base 0.74, 0.82). Threshold 0.25 tuned on MultiCoNER train sentences.",
+      "note": "NOT routed to any language yet (routing waits for the in-house mixed test set, D3). It runs Python code from its model repository (trust_remote_code, allowed by the owner on 2026-11-25), which is why the commit that was reviewed is pinned above; NER_ALLOW_REMOTE_CODE=0 switches it off. To use it for one language, add to your NER_MODELS_FILE: {\"routes\": {\"es\": \"multi-otter\"}}."
+    }
+  },
+  "routes": {
+    "en": "english-b-nofin",
+    "indic": "indic-indicbert-hi",
+    "*": "multi-davlan-hrl"
+  }
+}

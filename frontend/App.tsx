@@ -6,14 +6,16 @@ import {
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import HomeScreen from './src/screens/HomeScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
+import ReviewScreen from './src/screens/ReviewScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
 
-type Tab = 'annotate' | 'history';
+type Tab = 'annotate' | 'history' | 'review';
 
 const NAV_ITEMS: { key: Tab; label: string; icon: string }[] = [
   { key: 'annotate', label: 'Annotate', icon: 'A' },
   { key: 'history',  label: 'History',  icon: 'H' },
+  { key: 'review',   label: 'Review',   icon: 'R' },
 ];
 
 // ── Inner app (wrapped by AuthProvider) ────────────────────────────────────
@@ -128,16 +130,18 @@ function AppInner() {
           {/* Page title bar */}
           <View style={styles.pageTitleBar}>
             <Text style={styles.pageTitle}>
-              {activeTab === 'annotate' ? 'Annotate Text' : 'Annotation History'}
+              {activeTab === 'annotate' ? 'Annotate Text' : activeTab === 'review' ? 'Human Verification Queue' : 'Annotation History'}
             </Text>
             <Text style={styles.pageSubtitle}>
               {activeTab === 'annotate'
                 ? 'Upload or type text to detect entities and translate'
+                : activeTab === 'review'
+                ? 'Review, edit and approve annotations'
                 : 'Browse, search and export saved annotations'}
             </Text>
           </View>
 
-          {activeTab === 'annotate' ? <HomeScreen /> : <HistoryScreen />}
+          {activeTab === 'annotate' ? <HomeScreen /> : activeTab === 'review' ? <ReviewScreen /> : <HistoryScreen />}
         </View>
       </View>
     </SafeAreaView>
@@ -157,35 +161,38 @@ const styles = StyleSheet.create({
   // Loading
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#1a1f36',
+    backgroundColor: '#F8F7FF',
     justifyContent: 'center',
     alignItems: 'center',
   },
   loadingText: {
-    color: '#8b92a9',
+    color: '#7c3aed',
     marginTop: 12,
     fontSize: 14,
+    fontWeight: '600',
   },
 
   root: {
     flex: 1,
-    backgroundColor: '#f0f2f5',
+    backgroundColor: '#F3F2FF',
   },
 
   // ── HEADER
   header: {
-    backgroundColor: '#1a1f36',
+    backgroundColor: '#ffffff',
     paddingVertical: 0,
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    height: 60,
-    elevation: 6,
-    shadowColor: '#000',
+    height: 64,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8E6FF',
+    elevation: 0,
+    shadowColor: '#7c3aed',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
+    shadowOpacity: 0.07,
+    shadowRadius: 12,
     zIndex: 100,
   },
   headerLeft: {
@@ -199,12 +206,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   logoBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    backgroundColor: '#1a73e8',
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#7c3aed',
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
   logoText: {
     color: '#fff',
@@ -213,15 +224,16 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   headerTitle: {
-    color: '#fff',
+    color: '#1e1b4b',
     fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   headerSub: {
-    color: '#8b92a9',
+    color: '#a78bfa',
     fontSize: 11,
     marginTop: 1,
+    fontWeight: '500',
   },
   headerTabs: {
     flexDirection: 'row',
@@ -230,13 +242,13 @@ const styles = StyleSheet.create({
   headerTab: {
     paddingHorizontal: 14,
     paddingVertical: 7,
-    borderRadius: 6,
+    borderRadius: 20,
   },
   headerTabActive: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#7c3aed',
   },
   headerTabText: {
-    color: '#8b92a9',
+    color: '#a78bfa',
     fontWeight: '600',
     fontSize: 13,
   },
@@ -250,20 +262,20 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   userGreeting: {
-    color: '#8b92a9',
+    color: '#6d28d9',
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   logoutBtn: {
-    backgroundColor: '#2a2f4a',
+    backgroundColor: '#fdf2f8',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#3a4060',
+    borderColor: '#fbcfe8',
   },
   logoutBtnText: {
-    color: '#ef4444',
+    color: '#ec4899',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -276,47 +288,55 @@ const styles = StyleSheet.create({
 
   // ── SIDEBAR
   sidebar: {
-    width: 200,
-    backgroundColor: '#1a1f36',
-    paddingTop: 24,
-    paddingHorizontal: 12,
+    width: 210,
+    backgroundColor: '#ffffff',
+    paddingTop: 28,
+    paddingHorizontal: 14,
     borderRightWidth: 1,
-    borderRightColor: '#252a43',
+    borderRightColor: '#EDE9FE',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 2, height: 0 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
   },
   sidebarSection: {
     fontSize: 10,
     fontWeight: '700',
-    color: '#5a6177',
-    letterSpacing: 1.2,
+    color: '#c4b5fd',
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
-    marginBottom: 10,
-    paddingLeft: 8,
+    marginBottom: 12,
+    paddingLeft: 10,
   },
   navItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    borderRadius: 12,
     marginBottom: 4,
   },
   navItemActive: {
-    backgroundColor: '#252a43',
+    backgroundColor: '#EDE9FE',
   },
   navIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
-    backgroundColor: '#252a43',
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: '#F3F2FF',
     justifyContent: 'center',
     alignItems: 'center',
   },
   navIconActive: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#7c3aed',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
   },
   navIconText: {
-    color: '#5a6177',
+    color: '#a78bfa',
     fontWeight: '700',
     fontSize: 12,
   },
@@ -324,61 +344,64 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   navLabel: {
-    color: '#8b92a9',
+    color: '#7c6f9e',
     fontSize: 14,
     fontWeight: '500',
   },
   navLabelActive: {
-    color: '#fff',
+    color: '#6d28d9',
     fontWeight: '700',
   },
   sidebarFooter: {
     position: 'absolute',
     bottom: 20,
-    left: 12,
-    right: 12,
+    left: 14,
+    right: 14,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#252a43',
-    borderRadius: 8,
+    backgroundColor: '#F3F2FF',
+    borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#EDE9FE',
   },
   statusDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#34d399',
+    backgroundColor: '#10b981',
   },
   sidebarFooterText: {
-    color: '#8b92a9',
+    color: '#7c3aed',
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '600',
   },
 
   // ── CONTENT
   content: {
     flex: 1,
-    backgroundColor: '#f0f2f5',
+    backgroundColor: '#F3F2FF',
   },
   pageTitleBar: {
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 10,
-    backgroundColor: '#f0f2f5',
+    paddingHorizontal: 24,
+    paddingTop: 20,
+    paddingBottom: 14,
+    backgroundColor: '#F3F2FF',
     borderBottomWidth: 1,
-    borderBottomColor: '#e2e5ed',
+    borderBottomColor: '#EDE9FE',
   },
   pageTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '800',
-    color: '#1a1f36',
-    letterSpacing: 0.2,
+    color: '#1e1b4b',
+    letterSpacing: 0.1,
   },
   pageSubtitle: {
     fontSize: 13,
-    color: '#8b92a9',
-    marginTop: 2,
+    color: '#a78bfa',
+    marginTop: 3,
+    fontWeight: '500',
   },
 });
