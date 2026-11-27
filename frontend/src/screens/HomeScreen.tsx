@@ -140,6 +140,10 @@ export default function HomeScreen() {
   // keep the latest token/doc reachable from the file-input callback
   const uploadRef = useRef<(f: File) => void>(() => {});
 
+  // bulk upload state
+  const [bulkUploading, setBulkUploading]       = useState(false);
+  const [bulkResults, setBulkResults]           = useState<{ uploaded: DocInfo[]; errors: { filename: string; error: string }[] } | null>(null);
+
   useEffect(() => () => { pollRef.current.stop = true; }, []);   // stop polling when leaving the screen
 
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -214,6 +218,47 @@ export default function HomeScreen() {
     };
     inp.click();
   }, []);
+
+  // Bulk file upload trigger (up to 20 files)
+  const triggerBulkFileInput = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = DOC_ACCEPT;
+    inp.multiple = true;
+    inp.onchange = async (e: any) => {
+      const files: File[] = Array.from(e.target?.files || []);
+      if (!files.length) return;
+      if (files.length > 20) { showToast('Max 20 files at once', 'error'); return; }
+      if (files.length === 1) { uploadRef.current(files[0]); return; }
+      setBulkUploading(true);
+      setBulkResults(null);
+      try {
+        const form = new FormData();
+        files.forEach(f => form.append('files', f));
+        const res = await axios.post(`${BACKEND_URL}/api/documents/bulk`, form, authHeaders());
+        setBulkResults(res.data);
+        const { uploaded, errors } = res.data;
+        showToast(
+          `${uploaded.length} file${uploaded.length !== 1 ? 's' : ''} uploaded${errors.length ? `, ${errors.length} failed` : ''}`,
+          errors.length ? 'info' : 'success',
+        );
+        // Auto-select the first successfully uploaded document
+        if (uploaded.length > 0) {
+          if (doc) removeDocOnServer(doc.doc_id);
+          setDoc(uploaded[0]);
+          setUploadedFileName(uploaded[0].filename);
+          if (sourceLang === 'auto' && uploaded[0].detected_language) setDetectedLang(uploaded[0].detected_language);
+        }
+      } catch (err: any) {
+        if (err?.response?.status === 401) return;
+        showToast(err?.response?.data?.detail || 'Bulk upload failed', 'error');
+      } finally {
+        setBulkUploading(false);
+      }
+    };
+    inp.click();
+  }, [doc, sourceLang]);
 
   const copyText = async (text: string, label = 'Copied!') => {
     try {
@@ -457,18 +502,56 @@ export default function HomeScreen() {
                 </>
               ) : null}
               {Platform.OS === 'web' ? (
-                <TouchableOpacity
-                  style={[styles.iconBtn, styles.iconBtnPrimary, (uploading || loading) && styles.btnDisabled]}
-                  onPress={triggerFileInput}
-                  disabled={uploading || loading}
-                >
-                  <Text style={styles.iconBtnTextPrimary}>Upload File</Text>
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity
+                    style={[styles.iconBtn, styles.iconBtnPrimary, (uploading || loading || bulkUploading) && styles.btnDisabled]}
+                    onPress={triggerFileInput}
+                    disabled={uploading || loading || bulkUploading}
+                  >
+                    <Text style={styles.iconBtnTextPrimary}>Upload File</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.iconBtn, styles.iconBtnPrimary, (uploading || loading || bulkUploading) && styles.btnDisabled]}
+                    onPress={triggerBulkFileInput}
+                    disabled={uploading || loading || bulkUploading}
+                  >
+                    <Text style={styles.iconBtnTextPrimary}>{bulkUploading ? 'Uploading…' : 'Bulk Upload'}</Text>
+                  </TouchableOpacity>
+                </>
               ) : null}
             </View>
           </View>
 
-          {uploading ? (
+          {bulkUploading ? (
+            <View style={styles.docCard}>
+              <Text style={styles.docName}>Uploading multiple files…</Text>
+              <Text style={styles.docMeta}>Please wait while files are being processed</Text>
+            </View>
+          ) : bulkResults ? (
+            <View style={styles.docCard}>
+              <View style={styles.docHeader}>
+                <Text style={styles.docName}>Bulk Upload Complete</Text>
+                <TouchableOpacity onPress={() => setBulkResults(null)}>
+                  <Text style={styles.docRemove}>Dismiss</Text>
+                </TouchableOpacity>
+              </View>
+              {bulkResults.uploaded.length > 0 && (
+                <Text style={styles.docMeta}>
+                  {bulkResults.uploaded.length} file{bulkResults.uploaded.length !== 1 ? 's' : ''} ready:{' '}
+                  {bulkResults.uploaded.map(d => d.filename).join(', ')}
+                </Text>
+              )}
+              {bulkResults.errors.length > 0 && (
+                <Text style={[styles.docMeta, { color: '#dc2626' }]}>
+                  {bulkResults.errors.length} failed:{' '}
+                  {bulkResults.errors.map(e => `${e.filename} (${e.error})`).join('; ')}
+                </Text>
+              )}
+              <Text style={styles.docHint}>
+                First file selected. Click Analyze &amp; Translate to process it, then switch between files if needed.
+              </Text>
+            </View>
+          ) : uploading ? (
             <View style={styles.docCard}>
               <Text style={styles.docName}>{uploadPct < 100 ? `Uploading… ${uploadPct}%` : 'Reading the document…'}</Text>
               <View style={styles.progressTrack}>
@@ -597,7 +680,7 @@ export default function HomeScreen() {
             </View>
           ) : loading ? (
             <>
-              <ActivityIndicator size="large" color="#1a73e8" style={{ marginTop: 14 }} />
+              <ActivityIndicator size="large" color="#7c3aed" style={{ marginTop: 14 }} />
               <Text style={styles.docHint}>Offline translation models download on first use and can take a few minutes.</Text>
             </>
           ) : null}
@@ -768,7 +851,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   langBannerValueTarget: {
-    color: '#1a73e8',
+    color: '#7c3aed',
   },
   langBannerArrow: {
     fontSize: 18,
@@ -835,25 +918,25 @@ const styles = StyleSheet.create({
   iconBtn: {
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 6,
-    backgroundColor: '#f0f2f5',
-    borderWidth: 1,
-    borderColor: '#e2e5ed',
+    borderRadius: 8,
+    backgroundColor: '#F3F2FF',
+    borderWidth: 1.5,
+    borderColor: '#EDE9FE',
     marginLeft: 6,
   },
   iconBtnText: {
     fontSize: 12,
-    color: '#555',
+    color: '#7c3aed',
     fontWeight: '600',
   },
   iconBtnPrimary: {
-    backgroundColor: '#e8f0fe',
-    borderColor: '#1a73e8',
+    backgroundColor: '#EDE9FE',
+    borderColor: '#c4b5fd',
   },
   iconBtnTextPrimary: {
     fontSize: 12,
-    color: '#1a73e8',
-    fontWeight: '600',
+    color: '#6d28d9',
+    fontWeight: '700',
   },
 
   fileTag: {
@@ -915,8 +998,8 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   langChipActive: {
-    backgroundColor: '#e8f0fe',
-    borderColor: '#1a73e8',
+    backgroundColor: '#EDE9FE',
+    borderColor: '#7c3aed',
   },
   langChipText: {
     fontSize: 12,
@@ -940,7 +1023,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   langChipTextActive: {
-    color: '#1a73e8',
+    color: '#7c3aed',
     fontWeight: '700',
   },
 
@@ -951,28 +1034,33 @@ const styles = StyleSheet.create({
   },
   primaryBtn: {
     flex: 1,
-    backgroundColor: '#1a73e8',
-    borderRadius: 10,
-    paddingVertical: 13,
+    backgroundColor: '#7c3aed',
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: 'center',
     marginRight: 8,
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
   },
   primaryBtnText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '700',
+    letterSpacing: 0.2,
   },
   ghostBtn: {
     backgroundColor: '#fff',
-    borderRadius: 10,
-    paddingVertical: 13,
+    borderRadius: 12,
+    paddingVertical: 14,
     paddingHorizontal: 18,
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: '#e2e5ed',
+    borderColor: '#EDE9FE',
   },
   ghostBtnText: {
-    color: '#555',
+    color: '#7c3aed',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1067,11 +1155,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   translationBox: {
-    backgroundColor: '#f0f4ff',
-    borderRadius: 8,
+    backgroundColor: '#EDE9FE',
+    borderRadius: 10,
     padding: 14,
     borderLeftWidth: 3,
-    borderLeftColor: '#1a73e8',
+    borderLeftColor: '#7c3aed',
   },
   translationText: {
     fontSize: 15,
@@ -1087,7 +1175,7 @@ const styles = StyleSheet.create({
 
   // NER
   nerCountBadge: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#7c3aed',
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1110,11 +1198,11 @@ const styles = StyleSheet.create({
 
   // Progress
   progressWrap: { marginTop: 14 },
-  progressTrack: { height: 8, borderRadius: 4, backgroundColor: '#e2e5ed', overflow: 'hidden', marginTop: 8 },
-  progressFill: { height: 8, borderRadius: 4, backgroundColor: '#1a73e8' },
+  progressTrack: { height: 8, borderRadius: 4, backgroundColor: '#EDE9FE', overflow: 'hidden', marginTop: 8 },
+  progressFill: { height: 8, borderRadius: 4, backgroundColor: '#7c3aed' },
   progressRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
-  progressText: { fontSize: 12, color: '#374151', fontWeight: '600', flex: 1 },
-  progressCancel: { fontSize: 12, color: '#dc2626', fontWeight: '700' },
+  progressText: { fontSize: 12, color: '#6d28d9', fontWeight: '600', flex: 1 },
+  progressCancel: { fontSize: 12, color: '#ec4899', fontWeight: '700' },
 
   resultNote: { fontSize: 12, color: '#6b7280', marginTop: 8, lineHeight: 17 },
   warningBox: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', borderRadius: 8, padding: 10, marginBottom: 14 },
@@ -1193,10 +1281,10 @@ const styles = StyleSheet.create({
     overflow: 'visible' as any,
   },
   exportDropBtn: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#7c3aed',
     paddingHorizontal: 14,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 10,
   },
   exportDropBtnText: {
     color: '#fff',
