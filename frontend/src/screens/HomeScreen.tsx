@@ -146,6 +146,25 @@ export default function HomeScreen() {
 
   useEffect(() => () => { pollRef.current.stop = true; }, []);   // stop polling when leaving the screen
 
+  // What "Analyze & Translate" is doing now, and a note when one step is slow. The first request for a language makes the
+  // server download and load that language's model (measured: 1-1.5 minutes for a translation model on a slow connection,
+  // a few seconds once it is cached), which otherwise looks as if the app had frozen.
+  const SLOW_STEP_MS = 8000;
+  const [stepLabel, setStepLabel] = useState('');
+  const [stepSlow, setStepSlow]   = useState(false);
+  const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startStep = (label: string) => {
+    setStepLabel(label); setStepSlow(false);
+    if (slowTimer.current) clearTimeout(slowTimer.current);
+    slowTimer.current = setTimeout(() => setStepSlow(true), SLOW_STEP_MS);
+  };
+  const endSteps = () => {
+    if (slowTimer.current) clearTimeout(slowTimer.current);
+    slowTimer.current = null;
+    setStepLabel(''); setStepSlow(false);
+  };
+  useEffect(() => () => { if (slowTimer.current) clearTimeout(slowTimer.current); }, []);
+
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
@@ -358,6 +377,7 @@ export default function HomeScreen() {
 
     try {
       if (sourceLang === 'auto') {
+        startStep('Detecting language…');
         try {
           const r = await axios.post(`${BACKEND_URL}/api/detect-language`, { text: inputText }, authHeaders());
           if (r.data.detected_language) {
@@ -372,6 +392,7 @@ export default function HomeScreen() {
       setDetectedLang(srcLang);
 
       // NER failure must not block translation / saving
+      startStep('Finding entities…');
       try {
         const nerRes = await axios.post(`${BACKEND_URL}/api/ner`, { text: inputText, lang: srcLang }, authHeaders());
         nerEntities = nerRes.data.entities;
@@ -381,6 +402,7 @@ export default function HomeScreen() {
         showToast(nerErr?.response?.data?.detail || 'Entity recognition failed - continuing without it', 'info');
       }
 
+      startStep('Translating…');
       try {
         const transRes = await axios.post(`${BACKEND_URL}/api/translate`, {
           text: inputText, source_lang: srcLang, target_lang: targetLang,
@@ -392,6 +414,7 @@ export default function HomeScreen() {
         showToast(transErr?.response?.data?.detail || `Translation to "${targetLang}" not available`, 'info');
       }
 
+      startStep('Saving…');
       const saveRes = await axios.post(`${BACKEND_URL}/api/annotations`, {
         original_text: inputText, translated_text: translatedText,
         ner_tags: JSON.stringify(nerEntities), source_lang: srcLang, target_lang: targetLang,
@@ -402,6 +425,7 @@ export default function HomeScreen() {
     } catch (err: any) {
       showToast(err?.response?.data?.detail || 'Error connecting to backend', 'error');
     } finally {
+      endSteps();
       setLoading(false);
     }
   };
@@ -657,13 +681,18 @@ export default function HomeScreen() {
               disabled={loading || uploading}
             >
               <Text style={styles.primaryBtnText}>
-                {job ? `Processing ${Math.round(job.progress * 100)}%` : loading ? 'Analyzing...' : 'Analyze & Translate'}
+                {job ? `Processing ${Math.round(job.progress * 100)}%` : loading ? (stepLabel || 'Analyzing...') : 'Analyze & Translate'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.ghostBtn} onPress={handleClear} disabled={uploading}>
               <Text style={styles.ghostBtnText}>Clear</Text>
             </TouchableOpacity>
           </View>
+          {loading && !job && stepSlow ? (
+            <Text style={styles.resultNote}>
+              {`Still working: ${stepLabel.replace('…', '').toLowerCase()} takes longer the first time a language is used, because the server is downloading and loading its model (it can take 1-2 minutes). Later requests take a few seconds.`}
+            </Text>
+          ) : null}
 
           {job ? (
             <View style={styles.progressWrap}>

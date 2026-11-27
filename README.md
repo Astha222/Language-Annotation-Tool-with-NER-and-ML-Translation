@@ -62,6 +62,13 @@ Open <http://localhost:8081>, register an account and try it. API docs: <http://
 On Windows, `start-project.ps1` starts MongoDB/PostgreSQL checks, the backend and the frontend in one go.
 
 The first translation or entity request downloads its models and can take a few minutes; later requests are fast.
+While a step takes longer than 8 seconds, the page says so under the button.
+
+**With Docker (everything on one laptop):** `docker compose up --build` starts PostgreSQL, MongoDB, the backend (port 8000) and the frontend (port 8081).
+`backend/.env` is not used inside the containers; for Azure translation copy [`.env.example`](.env.example) to `.env` next to `docker-compose.yml` and
+put the key there. Without a key only the offline models translate, and the first request for each language downloads its model (1-2 minutes on a slow
+connection; give Docker Desktop at least 6 GB of memory). This compose file publishes the databases and is for a laptop only; for a server use
+[`deploy/oracle/`](deploy/oracle/README.md).
 
 ## Configuration
 

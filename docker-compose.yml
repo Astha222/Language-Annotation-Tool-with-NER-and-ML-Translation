@@ -58,6 +58,14 @@ services:
       PRELOAD_MODELS: ${PRELOAD_MODELS:-ner_en}
       TRANSLATION_PROVIDERS: ${TRANSLATION_PROVIDERS:-azure,local}
       LOCAL_INDICTRANS: ${LOCAL_INDICTRANS:-1}
+      # Azure AI Translator (optional). backend/.env is NOT read inside the container (it holds Windows paths and is kept out of the image),
+      # so put these in a .env file next to this docker-compose.yml (see .env.example; .env is git-ignored). Without a key, only the
+      # offline models translate, and the first request for each language downloads its model (1-2 minutes).
+      AZURE_TRANSLATOR_KEY: ${AZURE_TRANSLATOR_KEY:-}
+      AZURE_TRANSLATOR_REGION: ${AZURE_TRANSLATOR_REGION:-}
+      AZURE_TRANSLATOR_ENDPOINT: ${AZURE_TRANSLATOR_ENDPOINT:-}
+      # Hugging Face READ token, only while the English model's repository is private (otherwise English uses the fallback model)
+      HF_TOKEN: ${HF_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:
