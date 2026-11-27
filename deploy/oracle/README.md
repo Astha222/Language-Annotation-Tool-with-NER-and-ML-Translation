@@ -36,7 +36,7 @@ nano ~/annotation-tool/deploy/oracle/.env
 In `.env`:
 - `API_DOMAIN`: the public IP with dashes plus `.sslip.io`, e.g. IP `129.154.1.2` -> `129-154-1-2.sslip.io` (no sign-up needed). If the certificate fails, use a free DuckDNS name pointing to the IP instead.
 - `POSTGRES_PASSWORD`: `openssl rand -hex 24`; `JWT_SECRET`: `openssl rand -hex 32`. New values, never the laptop's.
-- `CORS_ORIGINS`: the Vercel address (fill in after step 4; until then the backend works but the website cannot call it).
+- `CORS_ORIGINS`: the Vercel production address, `https://annotation-tool-chi-eight.vercel.app` (until it is set the backend works but the website cannot call it).
 - `HF_TOKEN`: a Hugging Face **read** token while the English model's repository is private.
 
 Then:

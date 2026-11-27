@@ -143,8 +143,10 @@ Step-by-step guide, compose file and setup script: [`deploy/oracle/`](deploy/ora
 HTTPS address (e.g. `https://129-154-1-2.sslip.io`, no trailing slash). It is built into the JavaScript, so **redeploy the frontend after changing it**.
 The backend must be HTTPS: browsers block calls from an `https://` page to an `http://` API.
 
-**3. Connect them:** put the Vercel address into the backend's `CORS_ORIGINS` and restart the backend. For Vercel preview deployments, which each get
-their own address, `CORS_ORIGIN_REGEX` can allow a narrow pattern such as `^https://annotation-tool(-[a-z0-9-]+)?\.vercel\.app$` (never `.*`).
+**3. Connect them:** put the Vercel production address (today `https://annotation-tool-chi-eight.vercel.app`) into the backend's `CORS_ORIGINS` and restart
+the backend. That is all most setups need. Only if Vercel preview deployments (each with its own address) must reach the backend, `CORS_ORIGIN_REGEX` can
+allow a pattern tied to the team name, e.g. `^https://annotation-tool-[a-z0-9-]+-annotation-tool1\.vercel\.app$`. No pattern on `vercel.app` is airtight, because anyone can name a
+Vercel project so that its address matches; the risk is limited because logins use a Bearer token, not cookies. Never use `.*`.
 
 Other hosts work too: the backend reads `POSTGRES_URL` or `DATABASE_URL` (the name Railway, Render and Heroku use; `postgres://` is converted), and must
 listen on `0.0.0.0`. Free plans of Render, Koyeb and Railway (about 0.5 GB of memory when checked on 2026-11-26) are too small for the models, and

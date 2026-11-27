@@ -64,8 +64,11 @@ CORS_ORIGINS = [o.strip() for o in os.getenv(
     "http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006,http://127.0.0.1:19006",
 ).split(",") if o.strip()]
 # Optional: origins matching this regular expression are allowed too, for hosts that give every deployment its own address
-# (Vercel preview deployments: https://<project>-<hash>-<team>.vercel.app). Keep it as narrow as possible, e.g.
-#   CORS_ORIGIN_REGEX=^https://annotation-tool(-[a-z0-9-]+)?\.vercel\.app$
+# (Vercel preview deployments: https://<project>-<hash>-<team>.vercel.app). Prefer the exact production address in CORS_ORIGINS and leave
+# this empty unless preview deployments must reach the backend. No pattern on vercel.app is airtight: anyone can create a Vercel project
+# whose name makes its address match. The risk is limited because logins use a Bearer token, not cookies, so another site cannot act as a
+# logged-in user; still keep the pattern tied to the team name, e.g.
+#   CORS_ORIGIN_REGEX=^https://annotation-tool-[a-z0-9-]+-annotation-tool1\.vercel\.app$
 # Never use a pattern such as .* : any website could then call the API from its users' browsers.
 CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
 

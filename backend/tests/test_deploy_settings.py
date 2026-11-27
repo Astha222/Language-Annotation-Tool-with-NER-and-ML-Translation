@@ -28,14 +28,24 @@ def test_cors_stays_strict_by_default(main_module, client):
     assert "access-control-allow-origin" not in refused.headers
 
 
-def test_the_documented_vercel_pattern_is_narrow():
-    """The example in main.py / README must allow the project's own Vercel addresses and nothing else."""
-    pattern = re.compile(r"^https://annotation-tool(-[a-z0-9-]+)?\.vercel\.app$")
-    for ok in ("https://annotation-tool.vercel.app", "https://annotation-tool-git-main-team.vercel.app", "https://annotation-tool-3fk2x9-team.vercel.app"):
+def test_the_documented_vercel_preview_pattern():
+    """The example in main.py / README / .env.example: the team's real preview addresses match, other teams' and look-alike addresses do not.
+    It is NOT airtight, and the docs say so: a Vercel project named to fit the pattern would match (last assertion)."""
+    from pathlib import Path
+    pattern_text = r"^https://annotation-tool-[a-z0-9-]+-annotation-tool1\.vercel\.app$"
+    root = Path(__file__).resolve().parents[2]
+    for doc in ("backend/main.py", "backend/.env.example", "README.md", "deploy/oracle/.env.example"):   # every place that shows it
+        assert pattern_text in (root / doc).read_text(encoding="utf-8"), doc
+    pattern = re.compile(pattern_text)
+    for ok in ("https://annotation-tool-gwzm0o7p4-annotation-tool1.vercel.app", "https://annotation-tool-3juh9ov7e-annotation-tool1.vercel.app",
+               "https://annotation-tool-git-main-annotation-tool1.vercel.app"):           # real preview / branch addresses of the team
         assert pattern.fullmatch(ok)
-    for bad in ("http://annotation-tool.vercel.app", "https://annotation-tool.vercel.app.evil.com", "https://evil.com/?annotation-tool.vercel.app",
-                "https://my-annotation-tool.vercel.app", "https://annotation-tool.vercel.app/"):
+    for bad in ("https://annotation-tool-chi-eight.vercel.app",                            # production: belongs in CORS_ORIGINS, exactly
+                "https://annotation-tool-x-otherteam.vercel.app", "http://annotation-tool-a-annotation-tool1.vercel.app",
+                "https://annotation-tool-a-annotation-tool1.vercel.app.evil.com", "https://evil.com/?annotation-tool-a-annotation-tool1.vercel.app",
+                "https://my-annotation-tool-a-annotation-tool1.vercel.app"):
         assert not pattern.fullmatch(bad)
+    assert pattern.fullmatch("https://annotation-tool-x-annotation-tool1.vercel.app")   # known limit: a project with this name would match
 
 
 def test_secrets_published_in_the_repository_are_refused(main_module):
