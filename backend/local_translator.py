@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import threading
+import time
 from collections import OrderedDict
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -171,16 +172,18 @@ class _Engine:
             src_tag, tgt_tag = _tag(src), _tag(tgt)
             pre, maps = self.proc.preprocess_batch(texts, src_tag, tgt_tag)
             enc = self.tok(pre, padding="longest", truncation=True, max_length=512, return_tensors="pt")
+            max_new = min(400, max(64, int(enc["input_ids"].shape[1] * 2.5)))
             with torch.inference_mode():
-                out = self.model.generate(**enc, num_beams=beams, max_new_tokens=400,
+                out = self.model.generate(**enc, num_beams=beams, max_new_tokens=max_new,
                                           repetition_penalty=1.5 if beams > 1 else 1.2, early_stopping=beams > 1)
             dec = self.tok.batch_decode(out, skip_special_tokens=True, clean_up_tokenization_spaces=True)
             return self.proc.postprocess_batch(dec, tgt_tag, maps)
         if self.prefix:
             texts = [f"{self.prefix} {t}" for t in texts]
         enc = self.tok(texts, return_tensors="pt", padding=True, truncation=True, max_length=400)
+        max_new = min(400, max(64, int(enc["input_ids"].shape[1] * 2.5)))
         with torch.inference_mode():
-            out = self.model.generate(**enc, num_beams=beams, max_new_tokens=400)
+            out = self.model.generate(**enc, num_beams=beams, max_new_tokens=max_new)
         return self.tok.batch_decode(out, skip_special_tokens=True)
 
 
@@ -198,10 +201,13 @@ def _engine(src: str, tgt: str) -> _Engine:
     kind = "indictrans" if ikey else "marian"
     if kind == "marian" and ("en" not in key or (src not in _MARIAN_SOURCES and src != "en") or (tgt not in _MARIAN_TARGETS and tgt != "en")):
         raise LocalTranslationError(f"no direct local model for {src}->{tgt}")
+    t_load_start = time.perf_counter()
     eng = _Engine(kind, *key)
+    load_time = time.perf_counter() - t_load_start
+    logger.info(f"[TIMING] Loaded translation engine {kind}:{key[0]}->{key[1]} in {load_time:.2f}s")
     _engines[key] = eng
     try:
-        limit = max(1, int(os.getenv("LOCAL_MT_MAX_LOADED", "2")))
+        limit = max(1, int(os.getenv("LOCAL_MT_MAX_LOADED", "6")))
     except ValueError:
         limit = 2
     while len(_engines) > limit:
@@ -229,6 +235,7 @@ def _translate_direct(src: str, tgt: str, text: str, cancelled: Optional[Callabl
 
     order = sorted(range(len(jobs)), key=lambda n: len(jobs[n][2]))   # similar lengths together = less padding
     beams = _beams()
+    t_direct_start = time.perf_counter()
     with _lock:
         eng = _engine(src, tgt)
         for start in range(0, len(order), BATCH_SIZE):
@@ -239,6 +246,8 @@ def _translate_direct(src: str, tgt: str, text: str, cancelled: Optional[Callabl
             for n, translated in zip(idx, out):
                 pieces[jobs[n][0]][jobs[n][1]] = translated.strip()
 
+    direct_time = time.perf_counter() - t_direct_start
+    logger.info(f"[TIMING] Direct translation {src}->{tgt} ({len(jobs)} pieces, beams={beams}) completed in {direct_time:.3f}s")
     return "\n".join(" ".join(pieces[i]) if i in pieces else line for i, line in enumerate(lines))
 
 

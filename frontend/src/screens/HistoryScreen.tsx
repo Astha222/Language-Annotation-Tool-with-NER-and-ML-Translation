@@ -327,8 +327,12 @@ export default function HistoryScreen() {
                           <Text style={styles.cardId}>#{item.id}</Text>
                           <View style={styles.langBadges}>
                             <Text style={styles.langBadge}>{LANG_NAMES[item.source_lang] || item.source_lang}</Text>
-                            <Text style={styles.arrow}>→</Text>
-                            <Text style={styles.langBadge}>{LANG_NAMES[item.target_lang] || item.target_lang}</Text>
+                            {item.translated_text ? (
+                              <>
+                                <Text style={styles.arrow}>→</Text>
+                                <Text style={styles.langBadge}>{LANG_NAMES[item.target_lang] || item.target_lang}</Text>
+                              </>
+                            ) : null}
                           </View>
                           {item.source_name ? (
                             <Text style={styles.fileBadge} numberOfLines={1}>{item.source_name}</Text>
@@ -379,7 +383,7 @@ export default function HistoryScreen() {
                             </View>
                           </View>
                         ) : (
-                          <Text style={styles.noEntities}>No named entities found</Text>
+                          item.translated_text ? null : <Text style={styles.noEntities}>No named entities found</Text>
                         )}
 
                         {/* Delete Button */}

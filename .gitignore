@@ -35,3 +35,4 @@ evaluation/runs/
 .DS_Store
 Thumbs.db
 *.log
+scratch/

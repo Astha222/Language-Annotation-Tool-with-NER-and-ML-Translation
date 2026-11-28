@@ -15,7 +15,7 @@ private history, and export everything.
 ## Contents
 
 [Features](#features) · [Requirements](#requirements) · [Quick start](#quick-start) · [Configuration](#configuration) ·
-[Changing or adding an NER model](#changing-or-adding-an-ner-model) · [Translation providers](#translation-providers) · [Documents](#documents) · [Accuracy](#accuracy) · [Project layout](#project-layout) ·
+[Changing or adding an NER model](#changing-or-adding-an-ner-model) · [Deploying](#deploying-backend-on-an-oracle-cloud-vm-frontend-on-vercel) · [Translation providers](#translation-providers) · [Documents](#documents) · [Accuracy](#accuracy) · [Project layout](#project-layout) ·
 [Development](#development) · [Known limitations](#known-limitations) · [License](#license)
 
 ## Features
@@ -62,6 +62,13 @@ Open <http://localhost:8081>, register an account and try it. API docs: <http://
 On Windows, `start-project.ps1` starts MongoDB/PostgreSQL checks, the backend and the frontend in one go.
 
 The first translation or entity request downloads its models and can take a few minutes; later requests are fast.
+While a step takes longer than 8 seconds, the page says so under the button.
+
+**With Docker (everything on one laptop):** `docker compose up --build` starts PostgreSQL, MongoDB, the backend (port 8000) and the frontend (port 8081).
+`backend/.env` is not used inside the containers; for Azure translation copy [`.env.example`](.env.example) to `.env` next to `docker-compose.yml` and
+put the key there. Without a key only the offline models translate, and the first request for each language downloads its model (1-2 minutes on a slow
+connection; give Docker Desktop at least 6 GB of memory). This compose file publishes the databases and is for a laptop only; for a server use
+[`deploy/oracle/`](deploy/oracle/README.md).
 
 ## Configuration
 
@@ -122,6 +129,26 @@ It then serves every language that uses the model. If the file is missing or can
 The export script records the source model in `export_info.json` and the app **refuses an export made from a different model**. The old setting `NER_ONNX_DIR` / `NER_ONNX_FILE` still works for English, but it does not say
 which model it belongs to, so it is deprecated (a warning is logged; folders without `export_info.json` cannot be checked): when you change the English model, export the new one again and use the registry instead.
 `GET /health/models` (`ner_onnx`) shows which loaded models run from an ONNX build.
+
+## Deploying: backend on an Oracle Cloud VM, frontend on Vercel
+
+The backend (FastAPI + the models) needs a long-running server with about 3-5 GB of memory; the frontend is a static website. Both are hosted free of charge:
+
+**1. Backend: Oracle Cloud "Always Free" Arm VM** (2 OCPUs, 12 GB) with Docker Compose: the backend, PostgreSQL, MongoDB and Caddy for HTTPS.
+Step-by-step guide, compose file and setup script: [`deploy/oracle/`](deploy/oracle/README.md). The backend image must install the CPU build of PyTorch
+(`pip install torch --index-url https://download.pytorch.org/whl/cpu`, as the CI does) and run one worker.
+
+**2. Frontend: Vercel.** Import the repository and set **Root Directory** to `frontend`; `frontend/vercel.json` sets the build (`npm run build:web` =
+`expo export --platform web`), the `dist` output and the rewrite to the single page. Set the environment variable `EXPO_PUBLIC_API_URL` to the backend's
+HTTPS address (e.g. `https://129-154-1-2.sslip.io`, no trailing slash). It is built into the JavaScript, so **redeploy the frontend after changing it**.
+The backend must be HTTPS: browsers block calls from an `https://` page to an `http://` API.
+
+**3. Connect them:** put the Vercel address into the backend's `CORS_ORIGINS` and restart the backend. For Vercel preview deployments, which each get
+their own address, `CORS_ORIGIN_REGEX` can allow a narrow pattern such as `^https://annotation-tool(-[a-z0-9-]+)?\.vercel\.app$` (never `.*`).
+
+Other hosts work too: the backend reads `POSTGRES_URL` or `DATABASE_URL` (the name Railway, Render and Heroku use; `postgres://` is converted), and must
+listen on `0.0.0.0`. Free plans of Render, Koyeb and Railway (about 0.5 GB of memory when checked on 2026-11-26) are too small for the models, and
+Hugging Face Docker Spaces need a paid plan.
 
 ## Translation providers
 

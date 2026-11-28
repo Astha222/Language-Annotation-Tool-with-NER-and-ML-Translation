@@ -116,7 +116,12 @@ export default function HomeScreen() {
   const langTable = useLanguageTable();            // quality status of each Indian language (GET /api/languages)
   const targetLanguages = offeredLanguages(langTable);
   const sourceLanguages = [{ code: 'auto', name: 'Auto Detect' }, ...targetLanguages];
-  const [loading, setLoading]                   = useState(false);
+  const [nerLoading, setNerLoading]             = useState(false);
+  const [transLoading, setTransLoading]         = useState(false);
+  const [bothLoading, setBothLoading]           = useState(false);
+  const loading = nerLoading || transLoading || bothLoading;
+  const [nerRan, setNerRan]                     = useState(false);
+  const [transRan, setTransRan]                 = useState(false);
   const [nerResults, setNerResults]             = useState<any[]>([]);
   const [translationResult, setTranslationResult] = useState('');
   const [detectedLang, setDetectedLang]         = useState('');
@@ -140,17 +145,61 @@ export default function HomeScreen() {
   // keep the latest token/doc reachable from the file-input callback
   const uploadRef = useRef<(f: File) => void>(() => {});
 
+  // bulk upload state
+  const [bulkUploading, setBulkUploading]       = useState(false);
+  const [bulkResults, setBulkResults]           = useState<{ uploaded: DocInfo[]; errors: { filename: string; error: string }[] } | null>(null);
+
   useEffect(() => () => { pollRef.current.stop = true; }, []);   // stop polling when leaving the screen
+
+  // What "Analyze & Translate" is doing now, and a note when one step is slow. The first request for a language makes the
+  // server download and load that language's model (measured: 1-1.5 minutes for a translation model on a slow connection,
+  // a few seconds once it is cached), which otherwise looks as if the app had frozen.
+  const SLOW_STEP_MS = 8000;
+  const [stepLabel, setStepLabel] = useState('');
+  const [stepSlow, setStepSlow]   = useState(false);
+  const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startStep = (label: string) => {
+    setStepLabel(label); setStepSlow(false);
+    if (slowTimer.current) clearTimeout(slowTimer.current);
+    slowTimer.current = setTimeout(() => setStepSlow(true), SLOW_STEP_MS);
+  };
+  const endSteps = () => {
+    if (slowTimer.current) clearTimeout(slowTimer.current);
+    slowTimer.current = null;
+    setStepLabel(''); setStepSlow(false);
+  };
+  useEffect(() => () => { if (slowTimer.current) clearTimeout(slowTimer.current); }, []);
 
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
 
+  const lastAnalyzedText = useRef<string | null>(null);
+
   const resetResults = () => {
     setNerResults([]); setTranslationResult(''); setDetectedLang(''); setSaved(false); setSavedId(null);
     setNerSummary(null); setResultNote(''); setJobWarnings([]); setEngineNote('');
+    setNerRan(false); setTransRan(false);
   };
+
+  const handleTextChange = (text: string) => {
+    setInputText(text);
+    if (lastAnalyzedText.current !== null && text !== lastAnalyzedText.current) {
+      resetResults();
+      lastAnalyzedText.current = null;
+    } else if (savedId !== null || nerRan || transRan || nerResults.length > 0 || translationResult) {
+      resetResults();
+      lastAnalyzedText.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (lastAnalyzedText.current !== null && inputText !== lastAnalyzedText.current) {
+      resetResults();
+      lastAnalyzedText.current = null;
+    }
+  }, [inputText]);
 
   const removeDocOnServer = (id: string) => {
     axios.delete(`${BACKEND_URL}/api/documents/${id}`, authHeaders()).catch(() => {});
@@ -158,7 +207,7 @@ export default function HomeScreen() {
 
   const removeDoc = () => {
     if (doc) removeDocOnServer(doc.doc_id);
-    setDoc(null); setUploadedFileName(''); resetResults();
+    setDoc(null); setUploadedFileName(''); lastAnalyzedText.current = null; resetResults();
   };
 
   const uploadDocument = async (file: File) => {
@@ -166,7 +215,7 @@ export default function HomeScreen() {
       showToast(`File too large (max ${MAX_UPLOAD_MB} MB)`, 'error');
       return;
     }
-    setUploading(true); setUploadPct(0); resetResults();
+    setUploading(true); setUploadPct(0); lastAnalyzedText.current = null; resetResults();
     try {
       const form = new FormData();
       form.append('file', file);
@@ -177,6 +226,8 @@ export default function HomeScreen() {
       if (doc) removeDocOnServer(doc.doc_id);       // replacing an earlier upload
       const d: DocInfo = res.data;
       setDoc(d); setInputText(''); setUploadedFileName(d.filename);
+      lastAnalyzedText.current = null;
+      resetResults();
       if (sourceLang === 'auto' && d.detected_language) setDetectedLang(d.detected_language);
       showToast(`"${d.filename}" ready - ${d.chars.toLocaleString()} characters`, 'success');
     } catch (err: any) {
@@ -204,7 +255,10 @@ export default function HomeScreen() {
         reader.onload = (evt) => {
           setDoc(null);
           setUploadedFileName(file.name);
-          setInputText((evt.target?.result as string) || '');
+          const t = (evt.target?.result as string) || '';
+          setInputText(t);
+          lastAnalyzedText.current = null;
+          resetResults();
           showToast(`"${file.name}" loaded`, 'success');
         };
         reader.readAsText(file);
@@ -214,6 +268,47 @@ export default function HomeScreen() {
     };
     inp.click();
   }, []);
+
+  // Bulk file upload trigger (up to 20 files)
+  const triggerBulkFileInput = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = DOC_ACCEPT;
+    inp.multiple = true;
+    inp.onchange = async (e: any) => {
+      const files: File[] = Array.from(e.target?.files || []);
+      if (!files.length) return;
+      if (files.length > 20) { showToast('Max 20 files at once', 'error'); return; }
+      if (files.length === 1) { uploadRef.current(files[0]); return; }
+      setBulkUploading(true);
+      setBulkResults(null);
+      try {
+        const form = new FormData();
+        files.forEach(f => form.append('files', f));
+        const res = await axios.post(`${BACKEND_URL}/api/documents/bulk`, form, authHeaders());
+        setBulkResults(res.data);
+        const { uploaded, errors } = res.data;
+        showToast(
+          `${uploaded.length} file${uploaded.length !== 1 ? 's' : ''} uploaded${errors.length ? `, ${errors.length} failed` : ''}`,
+          errors.length ? 'info' : 'success',
+        );
+        // Auto-select the first successfully uploaded document
+        if (uploaded.length > 0) {
+          if (doc) removeDocOnServer(doc.doc_id);
+          setDoc(uploaded[0]);
+          setUploadedFileName(uploaded[0].filename);
+          if (sourceLang === 'auto' && uploaded[0].detected_language) setDetectedLang(uploaded[0].detected_language);
+        }
+      } catch (err: any) {
+        if (err?.response?.status === 401) return;
+        showToast(err?.response?.data?.detail || 'Bulk upload failed', 'error');
+      } finally {
+        setBulkUploading(false);
+      }
+    };
+    inp.click();
+  }, [doc, sourceLang]);
 
   const copyText = async (text: string, label = 'Copied!') => {
     try {
@@ -235,27 +330,75 @@ export default function HomeScreen() {
   // ── uploaded document: background job on the server, polled for progress ──
   const applyJobResult = (j: any) => {
     const res = j.result;
-    const preview: string = res.translated_preview || '';
+    const mode = res.mode || 'both';
     setDetectedLang(res.source_lang);
-    setTranslationResult(preview);
-    setNerResults(res.entities || []);
-    setNerSummary({ total: res.entity_total, unique: res.entity_unique });
     setSavedId(res.annotation_id); setSaved(true);
     setJobWarnings(j.warnings || []);
-    setEngineNote((res.translation_engines || []).join(' + '));
-    if (res.translated_chars > preview.length) {
-      setResultNote(
-        `Showing the first ${preview.length.toLocaleString()} of ${res.translated_chars.toLocaleString()} translated characters. ` +
-        'The full translation is saved in History - use Export to get all of it.'
-      );
+
+    if (mode === 'ner' || mode === 'both') {
+      setNerResults(res.entities || []);
+      setNerSummary({ total: res.entity_total, unique: res.entity_unique });
+      setNerRan(true);
     }
-    showToast(j.warnings?.length ? 'Saved with a warning - see the Output panel' : 'Document analyzed and saved',
+    if (mode === 'translate' || mode === 'both') {
+      const preview: string = res.translated_preview || '';
+      setTranslationResult(preview);
+      setEngineNote((res.translation_engines || []).join(' + '));
+      setTransRan(true);
+      if (res.translated_chars > preview.length) {
+        setResultNote(
+          `Showing the first ${preview.length.toLocaleString()} of ${res.translated_chars.toLocaleString()} translated characters. ` +
+          'The full translation is saved in History - use Export to get all of it.'
+        );
+      }
+    }
+    const msg = mode === 'ner'
+      ? 'Document NER analysis completed and saved'
+      : mode === 'translate'
+      ? 'Document translation completed and saved'
+      : 'Document analyzed and saved';
+    showToast(j.warnings?.length ? 'Saved with a warning - see the Output panel' : msg,
               j.warnings?.length ? 'info' : 'success');
   };
 
-  const analyzeDocument = async () => {
+  const analyzeDocument = async (mode: 'ner' | 'translate' | 'both') => {
     if (!doc) return;
-    setLoading(true); resetResults();
+    if (mode === 'ner') {
+      setNerLoading(true);
+      setNerResults([]);
+      setNerSummary(null);
+      setNerRan(false);
+      setTranslationResult('');
+      setResultNote('');
+      setEngineNote('');
+      setTransRan(false);
+    } else if (mode === 'translate') {
+      if (!targetLang) {
+        showToast('Please select a target language', 'error');
+        return;
+      }
+      setTransLoading(true);
+      setTranslationResult('');
+      setResultNote('');
+      setEngineNote('');
+      setTransRan(false);
+      setNerResults([]);
+      setNerSummary(null);
+      setNerRan(false);
+    } else {
+      if (!targetLang) {
+        showToast('Please select a target language', 'error');
+        return;
+      }
+      setBothLoading(true);
+      setNerResults([]);
+      setNerSummary(null);
+      setNerRan(false);
+      setTranslationResult('');
+      setResultNote('');
+      setEngineNote('');
+      setTransRan(false);
+    }
     setJob({ status: 'queued', stage: 'Starting', progress: 0 });
     const ctl = { stop: false };
     pollRef.current.stop = true;          // end any earlier poll loop
@@ -263,7 +406,7 @@ export default function HomeScreen() {
     try {
       const start = await axios.post(
         `${BACKEND_URL}/api/documents/${doc.doc_id}/analyze`,
-        { source_lang: sourceLang, target_lang: targetLang }, authHeaders(),
+        { source_lang: sourceLang, target_lang: targetLang, mode }, authHeaders(),
       );
       const jobId: string = start.data.job_id;
       jobIdRef.current = jobId;
@@ -290,7 +433,13 @@ export default function HomeScreen() {
       const detail = err?.response?.data?.detail;
       showToast(typeof detail === 'string' ? detail : 'Lost connection to the server', 'error');
     } finally {
-      if (!ctl.stop) { setLoading(false); setJob(null); jobIdRef.current = ''; }
+      if (!ctl.stop) {
+        setNerLoading(false);
+        setTransLoading(false);
+        setBothLoading(false);
+        setJob(null);
+        jobIdRef.current = '';
+      }
     }
   };
 
@@ -300,64 +449,233 @@ export default function HomeScreen() {
     setJob((j) => (j ? { ...j, stage: 'Cancelling…' } : j));
   };
 
-  const handleAnalyzeAndTranslate = async () => {
-    if (doc) { await analyzeDocument(); return; }
-    if (!inputText.trim()) { showToast('Please enter some text first, or upload a file', 'error'); return; }
-    setLoading(true);
-    setNerResults([]); setTranslationResult(''); setDetectedLang(''); setSaved(false); setSavedId(null);
-    setNerSummary(null); setResultNote(''); setJobWarnings([]); setEngineNote('');
+  const resolveSourceLanguage = async (text: string): Promise<string> => {
+    if (sourceLang !== 'auto') {
+      return sourceLang;
+    }
+    startStep('Detecting language…');
+    let detected = 'en';
+    try {
+      const r = await axios.post(`${BACKEND_URL}/api/detect-language`, { text }, authHeaders());
+      const lang = r.data.detected_language;
+      if (lang && LANGUAGE_NAMES[lang]) {
+        detected = lang;
+      } else {
+        showToast('Could not detect the language - assuming English', 'info');
+      }
+    } catch {
+      showToast('Language detection failed - assuming English', 'info');
+    }
+    setDetectedLang(detected);
+    return detected;
+  };
 
-    let srcLang = sourceLang === 'auto' ? 'en' : sourceLang;
-    let nerEntities: any[] = [];
-    let translatedText: string | null = null;
+  const executeNer = async (text: string, lang: string): Promise<any[]> => {
+    startStep('Finding entities…');
+    const nerRes = await axios.post(`${BACKEND_URL}/api/ner`, { text, lang }, authHeaders());
+    return nerRes.data.entities || [];
+  };
+
+  const executeTranslate = async (text: string, srcLang: string, tgtLang: string): Promise<{ translatedText: string; provider: string }> => {
+    startStep('Translating…');
+    const transRes = await axios.post(`${BACKEND_URL}/api/translate`, {
+      text,
+      source_lang: srcLang,
+      target_lang: tgtLang,
+    }, authHeaders());
+    return {
+      translatedText: transRes.data.translated_text ?? '',
+      provider: transRes.data.provider || '',
+    };
+  };
+
+  const handleAnalyzeNer = async () => {
+    if (nerLoading || transLoading || bothLoading || uploading) return;
+    if (doc) { await analyzeDocument('ner'); return; }
+    if (!inputText.trim()) { showToast('Please enter some text first, or upload a file', 'error'); return; }
+
+    setTranslationResult('');
+    setTransRan(false);
+    setEngineNote('');
+
+    setNerLoading(true);
+    setNerResults([]); setNerSummary(null); setJobWarnings([]);
+    startStep('Analyzing NER…');
 
     try {
-      if (sourceLang === 'auto') {
-        try {
-          const r = await axios.post(`${BACKEND_URL}/api/detect-language`, { text: inputText }, authHeaders());
-          if (r.data.detected_language) {
-            srcLang = r.data.detected_language;
-          } else {
-            showToast('Could not detect the language - assuming English', 'info');
-          }
-        } catch {
-          showToast('Language detection failed - assuming English', 'info');
-        }
-      }
-      setDetectedLang(srcLang);
+      const srcLang = await resolveSourceLanguage(inputText);
+      const nerEntities = await executeNer(inputText, srcLang);
+      setNerResults(nerEntities);
+      setNerRan(true);
+      lastAnalyzedText.current = inputText;
 
-      // NER failure must not block translation / saving
-      try {
-        const nerRes = await axios.post(`${BACKEND_URL}/api/ner`, { text: inputText, lang: srcLang }, authHeaders());
-        nerEntities = nerRes.data.entities;
-        setNerResults(nerEntities);
-      } catch (nerErr: any) {
-        if (nerErr?.response?.status === 401) throw nerErr;
-        showToast(nerErr?.response?.data?.detail || 'Entity recognition failed - continuing without it', 'info');
-      }
-
-      try {
-        const transRes = await axios.post(`${BACKEND_URL}/api/translate`, {
-          text: inputText, source_lang: srcLang, target_lang: targetLang,
+      startStep('Saving…');
+      if (savedId !== null) {
+        await axios.put(`${BACKEND_URL}/api/annotations/${savedId}`, {
+          ner_tags: JSON.stringify(nerEntities),
+          source_lang: srcLang,
         }, authHeaders());
-        translatedText = transRes.data.translated_text;
-        setEngineNote(transRes.data.provider || '');
-        setTranslationResult(translatedText ?? '');
-      } catch (transErr: any) {
-        showToast(transErr?.response?.data?.detail || `Translation to "${targetLang}" not available`, 'info');
+        setSaved(true);
+      } else {
+        const saveRes = await axios.post(`${BACKEND_URL}/api/annotations`, {
+          original_text: inputText,
+          translated_text: null,
+          ner_tags: JSON.stringify(nerEntities),
+          source_lang: srcLang,
+          target_lang: targetLang || 'fr',
+        }, authHeaders());
+        setSavedId(saveRes.data.id);
+        setSaved(true);
+      }
+      showToast(nerEntities.length > 0 ? `NER complete! Found ${nerEntities.length} entities` : 'NER complete (no entities found)', 'success');
+    } catch (err: any) {
+      if (err?.response?.status === 401) return;
+      showToast(err?.response?.data?.detail || 'NER analysis failed', 'error');
+    } finally {
+      endSteps();
+      setNerLoading(false);
+    }
+  };
+
+  const handleTranslate = async () => {
+    if (nerLoading || transLoading || bothLoading || uploading) return;
+    if (doc) { await analyzeDocument('translate'); return; }
+    if (!inputText.trim()) { showToast('Please enter some text first, or upload a file', 'error'); return; }
+    if (!targetLang) { showToast('Please select a target language', 'error'); return; }
+
+    setNerResults([]);
+    setNerSummary(null);
+    setNerRan(false);
+
+    setTransLoading(true);
+    setTranslationResult(''); setResultNote(''); setEngineNote(''); setJobWarnings([]);
+    startStep('Translating…');
+
+    try {
+      const srcLang = await resolveSourceLanguage(inputText);
+      const { translatedText, provider } = await executeTranslate(inputText, srcLang, targetLang);
+      setEngineNote(provider);
+      setTranslationResult(translatedText);
+      setTransRan(true);
+      lastAnalyzedText.current = inputText;
+
+      startStep('Saving…');
+      if (savedId !== null) {
+        await axios.put(`${BACKEND_URL}/api/annotations/${savedId}`, {
+          translated_text: translatedText,
+          source_lang: srcLang,
+          target_lang: targetLang,
+        }, authHeaders());
+        setSaved(true);
+      } else {
+        const saveRes = await axios.post(`${BACKEND_URL}/api/annotations`, {
+          original_text: inputText,
+          translated_text: translatedText,
+          ner_tags: JSON.stringify([]),
+          source_lang: srcLang,
+          target_lang: targetLang,
+        }, authHeaders());
+        setSavedId(saveRes.data.id);
+        setSaved(true);
+      }
+      showToast('Translation complete!', 'success');
+    } catch (err: any) {
+      if (err?.response?.status === 401) return;
+      showToast(err?.response?.data?.detail || 'Translation failed', 'error');
+    } finally {
+      endSteps();
+      setTransLoading(false);
+    }
+  };
+
+  const handleAnalyzeAndTranslate = async () => {
+    if (nerLoading || transLoading || bothLoading || uploading) return;
+    if (doc) { await analyzeDocument('both'); return; }
+    if (!inputText.trim()) { showToast('Please enter some text first, or upload a file', 'error'); return; }
+    if (!targetLang) { showToast('Please select a target language', 'error'); return; }
+
+    setBothLoading(true);
+    setNerResults([]); setNerSummary(null); setJobWarnings([]);
+    setTranslationResult(''); setResultNote(''); setEngineNote('');
+    startStep('Analyzing & Translating…');
+
+    try {
+      const srcLang = await resolveSourceLanguage(inputText);
+
+      startStep('Analyzing & Translating…');
+
+      // Safe concurrent execution of independent NER and Machine Translation
+      const [nerOutcome, transOutcome] = await Promise.allSettled([
+        executeNer(inputText, srcLang),
+        executeTranslate(inputText, srcLang, targetLang),
+      ]);
+
+      let nerEntities: any[] = [];
+      let nerSuccess = false;
+      if (nerOutcome.status === 'fulfilled') {
+        nerEntities = nerOutcome.value;
+        setNerResults(nerEntities);
+        setNerRan(true);
+        nerSuccess = true;
+      } else {
+        console.error('NER failed during combined run', nerOutcome.reason);
       }
 
-      const saveRes = await axios.post(`${BACKEND_URL}/api/annotations`, {
-        original_text: inputText, translated_text: translatedText,
-        ner_tags: JSON.stringify(nerEntities), source_lang: srcLang, target_lang: targetLang,
-      }, authHeaders());
-      setSavedId(saveRes.data.id);
-      setSaved(true);
-      showToast(translatedText ? 'Annotation saved!' : 'Annotation saved (no translation)', 'success');
+      let translatedText: string | null = null;
+      let transSuccess = false;
+      if (transOutcome.status === 'fulfilled') {
+        translatedText = transOutcome.value.translatedText;
+        setEngineNote(transOutcome.value.provider);
+        setTranslationResult(translatedText);
+        setTransRan(true);
+        transSuccess = true;
+      } else {
+        console.error('Translation failed during combined run', transOutcome.reason);
+      }
+
+      if (!nerSuccess && !transSuccess) {
+        showToast('Both NER and Translation failed', 'error');
+        return;
+      }
+
+      lastAnalyzedText.current = inputText;
+
+      startStep('Saving…');
+      // Save exactly ONE history record containing both results
+      if (savedId !== null) {
+        await axios.put(`${BACKEND_URL}/api/annotations/${savedId}`, {
+          original_text: inputText,
+          translated_text: translatedText,
+          ner_tags: JSON.stringify(nerEntities),
+          source_lang: srcLang,
+          target_lang: targetLang,
+        }, authHeaders());
+        setSaved(true);
+      } else {
+        const saveRes = await axios.post(`${BACKEND_URL}/api/annotations`, {
+          original_text: inputText,
+          translated_text: translatedText,
+          ner_tags: JSON.stringify(nerEntities),
+          source_lang: srcLang,
+          target_lang: targetLang,
+        }, authHeaders());
+        setSavedId(saveRes.data.id);
+        setSaved(true);
+      }
+
+      if (nerSuccess && transSuccess) {
+        showToast('Analysis & Translation complete!', 'success');
+      } else if (nerSuccess && !transSuccess) {
+        showToast('NER complete, but translation failed', 'info');
+      } else {
+        showToast('Translation complete, but NER failed', 'info');
+      }
     } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Error connecting to backend', 'error');
+      if (err?.response?.status === 401) return;
+      showToast(err?.response?.data?.detail || 'Analysis & Translation failed', 'error');
     } finally {
-      setLoading(false);
+      endSteps();
+      setBothLoading(false);
     }
   };
 
@@ -365,6 +683,8 @@ export default function HomeScreen() {
     if (job) cancelJob();
     removeDoc();
     setInputText(''); setUploadedFileName('');
+    lastAnalyzedText.current = null;
+    resetResults();
   };
 
   const handleExport = async (fmt: string) => {
@@ -411,7 +731,7 @@ export default function HomeScreen() {
   };
 
   const getNerColor = (eg: string) => NER_COLORS[eg] || { bg: '#fce4ec', text: '#880e4f', label: eg };
-  const hasResults = !!(translationResult || nerResults.length > 0);
+  const hasResults = !!(translationResult || nerResults.length > 0 || (nerRan && !nerLoading));
   const resolvedSrc = detectedLang || (sourceLang !== 'auto' ? sourceLang : '');
 
   return (
@@ -457,18 +777,56 @@ export default function HomeScreen() {
                 </>
               ) : null}
               {Platform.OS === 'web' ? (
-                <TouchableOpacity
-                  style={[styles.iconBtn, styles.iconBtnPrimary, (uploading || loading) && styles.btnDisabled]}
-                  onPress={triggerFileInput}
-                  disabled={uploading || loading}
-                >
-                  <Text style={styles.iconBtnTextPrimary}>Upload File</Text>
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity
+                    style={[styles.iconBtn, styles.iconBtnPrimary, (uploading || loading || bulkUploading) && styles.btnDisabled]}
+                    onPress={triggerFileInput}
+                    disabled={uploading || loading || bulkUploading}
+                  >
+                    <Text style={styles.iconBtnTextPrimary}>Upload File</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.iconBtn, styles.iconBtnPrimary, (uploading || loading || bulkUploading) && styles.btnDisabled]}
+                    onPress={triggerBulkFileInput}
+                    disabled={uploading || loading || bulkUploading}
+                  >
+                    <Text style={styles.iconBtnTextPrimary}>{bulkUploading ? 'Uploading…' : 'Bulk Upload'}</Text>
+                  </TouchableOpacity>
+                </>
               ) : null}
             </View>
           </View>
 
-          {uploading ? (
+          {bulkUploading ? (
+            <View style={styles.docCard}>
+              <Text style={styles.docName}>Uploading multiple files…</Text>
+              <Text style={styles.docMeta}>Please wait while files are being processed</Text>
+            </View>
+          ) : bulkResults ? (
+            <View style={styles.docCard}>
+              <View style={styles.docHeader}>
+                <Text style={styles.docName}>Bulk Upload Complete</Text>
+                <TouchableOpacity onPress={() => setBulkResults(null)}>
+                  <Text style={styles.docRemove}>Dismiss</Text>
+                </TouchableOpacity>
+              </View>
+              {bulkResults.uploaded.length > 0 && (
+                <Text style={styles.docMeta}>
+                  {bulkResults.uploaded.length} file{bulkResults.uploaded.length !== 1 ? 's' : ''} ready:{' '}
+                  {bulkResults.uploaded.map(d => d.filename).join(', ')}
+                </Text>
+              )}
+              {bulkResults.errors.length > 0 && (
+                <Text style={[styles.docMeta, { color: '#dc2626' }]}>
+                  {bulkResults.errors.length} failed:{' '}
+                  {bulkResults.errors.map(e => `${e.filename} (${e.error})`).join('; ')}
+                </Text>
+              )}
+              <Text style={styles.docHint}>
+                First file selected. Click Analyze &amp; Translate to process it, then switch between files if needed.
+              </Text>
+            </View>
+          ) : uploading ? (
             <View style={styles.docCard}>
               <Text style={styles.docName}>{uploadPct < 100 ? `Uploading… ${uploadPct}%` : 'Reading the document…'}</Text>
               <View style={styles.progressTrack}>
@@ -517,7 +875,7 @@ export default function HomeScreen() {
                 placeholder="Type or paste text, or upload a file (PDF, Word, Excel, PowerPoint, CSV, TXT…)"
                 placeholderTextColor="#b0b8c9"
                 value={inputText}
-                onChangeText={setInputText}
+                onChangeText={handleTextChange}
               />
             </>
           )}
@@ -569,18 +927,72 @@ export default function HomeScreen() {
           {/* Action Buttons */}
           <View style={styles.btnRow}>
             <TouchableOpacity
-              style={[styles.primaryBtn, (loading || uploading) && styles.btnDisabled]}
-              onPress={handleAnalyzeAndTranslate}
-              disabled={loading || uploading}
+              style={[
+                styles.actionBtn,
+                styles.nerBtn,
+                (nerLoading || transLoading || bothLoading || uploading) && styles.btnDisabled,
+              ]}
+              onPress={handleAnalyzeNer}
+              disabled={nerLoading || transLoading || bothLoading || uploading}
             >
-              <Text style={styles.primaryBtnText}>
-                {job ? `Processing ${Math.round(job.progress * 100)}%` : loading ? 'Analyzing...' : 'Analyze & Translate'}
+              <Text style={styles.actionBtnText}>
+                {job && job.stage.toLowerCase().includes('finding') && nerLoading
+                  ? `Finding NER ${Math.round(job.progress * 100)}%`
+                  : nerLoading
+                  ? (stepLabel || 'Analyzing…')
+                  : 'Analyze NER'}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.ghostBtn} onPress={handleClear} disabled={uploading}>
+
+            <TouchableOpacity
+              style={[
+                styles.actionBtn,
+                styles.translateBtn,
+                (nerLoading || transLoading || bothLoading || uploading) && styles.btnDisabled,
+              ]}
+              onPress={handleTranslate}
+              disabled={nerLoading || transLoading || bothLoading || uploading}
+            >
+              <Text style={styles.actionBtnText}>
+                {job && job.stage.toLowerCase().includes('translating') && transLoading
+                  ? `Translating ${Math.round(job.progress * 100)}%`
+                  : transLoading
+                  ? (stepLabel || 'Translating…')
+                  : 'Translate'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.actionBtn,
+                styles.bothBtn,
+                (nerLoading || transLoading || bothLoading || uploading) && styles.btnDisabled,
+              ]}
+              onPress={handleAnalyzeAndTranslate}
+              disabled={nerLoading || transLoading || bothLoading || uploading}
+            >
+              <Text style={styles.actionBtnText}>
+                {job && bothLoading
+                  ? `Processing ${Math.round(job.progress * 100)}%`
+                  : bothLoading
+                  ? (stepLabel || 'Analyzing & Translating…')
+                  : 'Analyze & Translate'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.ghostBtn}
+              onPress={handleClear}
+              disabled={nerLoading || transLoading || bothLoading || uploading}
+            >
               <Text style={styles.ghostBtnText}>Clear</Text>
             </TouchableOpacity>
           </View>
+          {loading && !job && stepSlow ? (
+            <Text style={styles.resultNote}>
+              {`Still working: ${stepLabel.replace('…', '').toLowerCase()} takes longer the first time a language is used, because the server is downloading and loading its model (it can take 1-2 minutes). Later requests take a few seconds.`}
+            </Text>
+          ) : null}
 
           {job ? (
             <View style={styles.progressWrap}>
@@ -597,8 +1009,8 @@ export default function HomeScreen() {
             </View>
           ) : loading ? (
             <>
-              <ActivityIndicator size="large" color="#1a73e8" style={{ marginTop: 14 }} />
-              <Text style={styles.docHint}>Offline translation models download on first use and can take a few minutes.</Text>
+              <ActivityIndicator size="large" color="#7c3aed" style={{ marginTop: 14 }} />
+              <Text style={styles.docHint}>Offline models download on first use and can take a few minutes.</Text>
             </>
           ) : null}
         </View>
@@ -632,8 +1044,12 @@ export default function HomeScreen() {
           {resolvedSrc ? (
             <View style={styles.outputLangRow}>
               <Text style={styles.outputLangText}>{LANG_NAME[resolvedSrc] || resolvedSrc.toUpperCase()}</Text>
-              <Text style={styles.outputLangArrow}>{'→'}</Text>
-              <Text style={[styles.outputLangText, styles.outputLangTarget]}>{LANG_NAME[targetLang] || targetLang}</Text>
+              {translationResult ? (
+                <>
+                  <Text style={styles.outputLangArrow}>{'→'}</Text>
+                  <Text style={[styles.outputLangText, styles.outputLangTarget]}>{LANG_NAME[targetLang] || targetLang}</Text>
+                </>
+              ) : null}
             </View>
           ) : null}
 
@@ -650,7 +1066,7 @@ export default function HomeScreen() {
                 <Text style={styles.emptyOutputIconText}>O</Text>
               </View>
               <Text style={styles.emptyOutputTitle}>No output yet</Text>
-              <Text style={styles.emptyOutputSub}>Enter text or upload a document on the left and click Analyze & Translate</Text>
+              <Text style={styles.emptyOutputSub}>Enter text or upload a document on the left and click Analyze NER, Translate, or Analyze & Translate</Text>
             </View>
           ) : null}
 
@@ -711,9 +1127,10 @@ export default function HomeScreen() {
                   );
                 })}
               </View>
+              {saved && !translationResult ? <Text style={styles.savedBadge}>Saved to database</Text> : null}
             </View>
           ) : (
-            !loading && translationResult ? (
+            !nerLoading && nerRan ? (
               <Text style={styles.noEntities}>No named entities detected.</Text>
             ) : null
           )}
@@ -768,7 +1185,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   langBannerValueTarget: {
-    color: '#1a73e8',
+    color: '#7c3aed',
   },
   langBannerArrow: {
     fontSize: 18,
@@ -835,25 +1252,25 @@ const styles = StyleSheet.create({
   iconBtn: {
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 6,
-    backgroundColor: '#f0f2f5',
-    borderWidth: 1,
-    borderColor: '#e2e5ed',
+    borderRadius: 8,
+    backgroundColor: '#F3F2FF',
+    borderWidth: 1.5,
+    borderColor: '#EDE9FE',
     marginLeft: 6,
   },
   iconBtnText: {
     fontSize: 12,
-    color: '#555',
+    color: '#7c3aed',
     fontWeight: '600',
   },
   iconBtnPrimary: {
-    backgroundColor: '#e8f0fe',
-    borderColor: '#1a73e8',
+    backgroundColor: '#EDE9FE',
+    borderColor: '#c4b5fd',
   },
   iconBtnTextPrimary: {
     fontSize: 12,
-    color: '#1a73e8',
-    fontWeight: '600',
+    color: '#6d28d9',
+    fontWeight: '700',
   },
 
   fileTag: {
@@ -915,8 +1332,8 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   langChipActive: {
-    backgroundColor: '#e8f0fe',
-    borderColor: '#1a73e8',
+    backgroundColor: '#EDE9FE',
+    borderColor: '#7c3aed',
   },
   langChipText: {
     fontSize: 12,
@@ -940,7 +1357,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   langChipTextActive: {
-    color: '#1a73e8',
+    color: '#7c3aed',
     fontWeight: '700',
   },
 
@@ -949,30 +1366,66 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: 16,
   },
+  actionBtn: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 13,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    marginRight: 6,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  nerBtn: {
+    backgroundColor: '#2563eb',
+    shadowColor: '#2563eb',
+  },
+  translateBtn: {
+    backgroundColor: '#7c3aed',
+    shadowColor: '#7c3aed',
+  },
+  bothBtn: {
+    backgroundColor: '#4f46e5',
+    shadowColor: '#4f46e5',
+  },
+  actionBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    textAlign: 'center',
+  },
   primaryBtn: {
     flex: 1,
-    backgroundColor: '#1a73e8',
-    borderRadius: 10,
-    paddingVertical: 13,
+    backgroundColor: '#7c3aed',
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: 'center',
     marginRight: 8,
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
   },
   primaryBtnText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '700',
+    letterSpacing: 0.2,
   },
   ghostBtn: {
     backgroundColor: '#fff',
-    borderRadius: 10,
-    paddingVertical: 13,
+    borderRadius: 12,
+    paddingVertical: 14,
     paddingHorizontal: 18,
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: '#e2e5ed',
+    borderColor: '#EDE9FE',
   },
   ghostBtnText: {
-    color: '#555',
+    color: '#7c3aed',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1067,11 +1520,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   translationBox: {
-    backgroundColor: '#f0f4ff',
-    borderRadius: 8,
+    backgroundColor: '#EDE9FE',
+    borderRadius: 10,
     padding: 14,
     borderLeftWidth: 3,
-    borderLeftColor: '#1a73e8',
+    borderLeftColor: '#7c3aed',
   },
   translationText: {
     fontSize: 15,
@@ -1087,7 +1540,7 @@ const styles = StyleSheet.create({
 
   // NER
   nerCountBadge: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#7c3aed',
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1110,11 +1563,11 @@ const styles = StyleSheet.create({
 
   // Progress
   progressWrap: { marginTop: 14 },
-  progressTrack: { height: 8, borderRadius: 4, backgroundColor: '#e2e5ed', overflow: 'hidden', marginTop: 8 },
-  progressFill: { height: 8, borderRadius: 4, backgroundColor: '#1a73e8' },
+  progressTrack: { height: 8, borderRadius: 4, backgroundColor: '#EDE9FE', overflow: 'hidden', marginTop: 8 },
+  progressFill: { height: 8, borderRadius: 4, backgroundColor: '#7c3aed' },
   progressRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
-  progressText: { fontSize: 12, color: '#374151', fontWeight: '600', flex: 1 },
-  progressCancel: { fontSize: 12, color: '#dc2626', fontWeight: '700' },
+  progressText: { fontSize: 12, color: '#6d28d9', fontWeight: '600', flex: 1 },
+  progressCancel: { fontSize: 12, color: '#ec4899', fontWeight: '700' },
 
   resultNote: { fontSize: 12, color: '#6b7280', marginTop: 8, lineHeight: 17 },
   warningBox: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', borderRadius: 8, padding: 10, marginBottom: 14 },
@@ -1193,10 +1646,10 @@ const styles = StyleSheet.create({
     overflow: 'visible' as any,
   },
   exportDropBtn: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#7c3aed',
     paddingHorizontal: 14,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 10,
   },
   exportDropBtnText: {
     color: '#fff',

@@ -274,3 +274,104 @@ class TestDocuments:
     def test_unknown_job_is_a_404_with_a_hint(self, client, auth):
         r = client.get("/api/jobs/" + "0" * 32, headers=auth)
         assert r.status_code == 404 and "run it again" in r.json()["detail"]
+
+
+class TestIndependentNerAndTranslation:
+    def test_ner_only_flow(self, client, auth):
+        # 1. Run NER directly
+        ner_resp = client.post("/api/ner", json={"text": "Sundar Pichai leads Google in Mountain View .", "lang": "en"}, headers=auth)
+        assert ner_resp.status_code == 200
+        entities = ner_resp.json()["entities"]
+        assert len(entities) > 0
+
+        # 2. Save annotation without translation
+        save_resp = client.post("/api/annotations", json={
+            "original_text": "Sundar Pichai leads Google in Mountain View .",
+            "translated_text": None,
+            "ner_tags": json.dumps(entities),
+            "source_lang": "en",
+            "target_lang": "fr",
+        }, headers=auth)
+        assert save_resp.status_code == 201
+        data = save_resp.json()
+        assert data["translated_text"] is None
+        assert data["ner_tags"] is not None
+
+        # 3. Retrieve from history
+        get_resp = client.get(f"/api/annotations/{data['id']}", headers=auth)
+        assert get_resp.status_code == 200
+        assert get_resp.json()["translated_text"] is None
+
+    def test_translation_only_flow(self, client, auth, providers):
+        # 1. Run Translation directly
+        tr_resp = client.post("/api/translate", json={
+            "text": "Hello world",
+            "source_lang": "en",
+            "target_lang": "fr",
+        }, headers=auth)
+        assert tr_resp.status_code == 200
+        translated = tr_resp.json()["translated_text"]
+        assert translated
+
+        # 2. Save annotation without NER tags
+        save_resp = client.post("/api/annotations", json={
+            "original_text": "Hello world",
+            "translated_text": translated,
+            "ner_tags": json.dumps([]),
+            "source_lang": "en",
+            "target_lang": "fr",
+        }, headers=auth)
+        assert save_resp.status_code == 201
+        data = save_resp.json()
+        assert data["translated_text"] == translated
+        assert data["ner_tags"] is None or data["ner_tags"] == "[]"
+
+    def test_ner_then_translate_updates_annotation(self, client, auth, providers):
+        # 1. Run NER first and save
+        save_resp = client.post("/api/annotations", json={
+            "original_text": "Satya Nadella works at Microsoft .",
+            "translated_text": None,
+            "ner_tags": json.dumps([{"word": "Satya Nadella", "entity_group": "PER", "score": 0.99, "start": 0, "end": 13}]),
+            "source_lang": "en",
+            "target_lang": "fr",
+        }, headers=auth)
+        ann_id = save_resp.json()["id"]
+
+        # 2. Run Translation afterwards and update existing annotation
+        tr_resp = client.post("/api/translate", json={"text": "Satya Nadella works at Microsoft .", "source_lang": "en", "target_lang": "fr"}, headers=auth)
+        translated = tr_resp.json()["translated_text"]
+        update_resp = client.put(f"/api/annotations/{ann_id}", json={
+            "translated_text": translated,
+            "target_lang": "fr",
+        }, headers=auth)
+        assert update_resp.status_code == 200
+        updated_data = update_resp.json()
+        assert updated_data["translated_text"] == translated
+        assert updated_data["ner_tags"] is not None
+
+    def test_document_job_mode_ner_only(self, client, auth, providers):
+        doc = upload(client, auth).json()
+        job_id = client.post(
+            f"/api/documents/{doc['doc_id']}/analyze",
+            json={"source_lang": "en", "target_lang": "fr", "mode": "ner"},
+            headers=auth
+        ).json()["job_id"]
+        res = wait_for(client, auth, job_id)
+        assert res["status"] == "done"
+        assert res["result"]["mode"] == "ner"
+        assert res["result"]["translated_chars"] == 0
+        assert res["result"]["entity_total"] >= 0
+
+    def test_document_job_mode_translate_only(self, client, auth, providers):
+        doc = upload(client, auth).json()
+        job_id = client.post(
+            f"/api/documents/{doc['doc_id']}/analyze",
+            json={"source_lang": "en", "target_lang": "hi", "mode": "translate"},
+            headers=auth
+        ).json()["job_id"]
+        res = wait_for(client, auth, job_id)
+        assert res["status"] == "done"
+        assert res["result"]["mode"] == "translate"
+        assert res["result"]["entity_total"] == 0
+        assert res["result"]["translated_chars"] > 0
+

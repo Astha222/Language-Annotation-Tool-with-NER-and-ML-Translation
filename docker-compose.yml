@@ -55,9 +55,19 @@ services:
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081,http://127.0.0.1:8081,http://localhost:8000,http://127.0.0.1:8000}
       HF_HOME: /root/.cache/huggingface
-      PRELOAD_MODELS: ${PRELOAD_MODELS:-ner_en}
+      PRELOAD_MODELS: ${PRELOAD_MODELS:-ner_en,ner_hi,mt:en-hi}
+      NER_MAX_MODELS: ${NER_MAX_MODELS:-4}
+      LOCAL_MT_MAX_LOADED: ${LOCAL_MT_MAX_LOADED:-6}
       TRANSLATION_PROVIDERS: ${TRANSLATION_PROVIDERS:-azure,local}
       LOCAL_INDICTRANS: ${LOCAL_INDICTRANS:-1}
+      # Azure AI Translator (optional). backend/.env is NOT read inside the container (it holds Windows paths and is kept out of the image),
+      # so put these in a .env file next to this docker-compose.yml (see .env.example; .env is git-ignored). Without a key, only the
+      # offline models translate, and the first request for each language downloads its model (1-2 minutes).
+      AZURE_TRANSLATOR_KEY: ${AZURE_TRANSLATOR_KEY:-}
+      AZURE_TRANSLATOR_REGION: ${AZURE_TRANSLATOR_REGION:-}
+      AZURE_TRANSLATOR_ENDPOINT: ${AZURE_TRANSLATOR_ENDPOINT:-}
+      # Hugging Face READ token, only while the English model's repository is private (otherwise English uses the fallback model)
+      HF_TOKEN: ${HF_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:
@@ -66,8 +76,8 @@ services:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/docs || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 6
+      start_period: 60s
     networks:
       - annotation-net
 

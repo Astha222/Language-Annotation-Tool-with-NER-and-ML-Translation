@@ -32,7 +32,13 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-POSTGRES_URL       = os.getenv("POSTGRES_URL", "postgresql://postgres:postgres@localhost:5432/annotationtool")
+def database_url(env=os.environ) -> str:
+    """POSTGRES_URL, else DATABASE_URL (the name Railway, Heroku and Render give their Postgres), else a local default.
+    The old "postgres://" scheme some hosts still hand out is not accepted by SQLAlchemy 2, so it is rewritten to "postgresql://"."""
+    url = (env.get("POSTGRES_URL") or env.get("DATABASE_URL") or "").strip() or "postgresql://postgres:postgres@localhost:5432/annotationtool"
+    return "postgresql://" + url[len("postgres://"):] if url.startswith("postgres://") else url
+
+POSTGRES_URL       = database_url()
 MONGO_URL          = os.getenv("MONGO_URL",    "mongodb://localhost:27017")
 MONGO_DB           = os.getenv("MONGO_DB",     "annotationtool")
 JWT_ALGORITHM      = os.getenv("JWT_ALGORITHM","HS256")
@@ -40,7 +46,9 @@ JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
 
 # Never fall back to a known, hardcoded secret: anyone could forge tokens with it.
 # If no real secret is configured, use a random one for this process (logins reset on restart).
-_UNSAFE_SECRETS = {"", "CHANGE_ME_TO_A_LONG_RANDOM_STRING", "supersecretjwtkey2024annotationtool"}
+# Every secret ever written into this public repository is unsafe, however long (the last one is the development default in docker-compose.yml).
+_UNSAFE_SECRETS = {"", "CHANGE_ME_TO_A_LONG_RANDOM_STRING", "supersecretjwtkey2024annotationtool",
+                   "annotationtool_jwt_secret_dev_key_32chars_min!"}
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 if JWT_SECRET in _UNSAFE_SECRETS or len(JWT_SECRET) < 32:
     JWT_SECRET = secrets.token_hex(32)
@@ -55,6 +63,11 @@ CORS_ORIGINS = [o.strip() for o in os.getenv(
     "CORS_ORIGINS",
     "http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006,http://127.0.0.1:19006",
 ).split(",") if o.strip()]
+# Optional: origins matching this regular expression are allowed too, for hosts that give every deployment its own address
+# (Vercel preview deployments: https://<project>-<hash>-<team>.vercel.app). Keep it as narrow as possible, e.g.
+#   CORS_ORIGIN_REGEX=^https://annotation-tool(-[a-z0-9-]+)?\.vercel\.app$
+# Never use a pattern such as .* : any website could then call the API from its users' browsers.
+CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
 
 # -------------------------------------------------------
 # Auth helpers
@@ -80,7 +93,11 @@ def create_access_token(data: dict) -> str:
 # -------------------------------------------------------
 # SQLite: several threads write (requests and document jobs, which save their progress); wait up to 30 s for a lock instead of the default 5 s
 connect_args = {"check_same_thread": False, "timeout": 30} if POSTGRES_URL.startswith("sqlite") else {}
-engine       = create_engine(POSTGRES_URL, connect_args=connect_args)
+engine       = create_engine(
+    POSTGRES_URL,
+    connect_args=connect_args,
+    **({} if POSTGRES_URL.startswith("sqlite") else {"pool_size": 20, "max_overflow": 40, "pool_pre_ping": True}),
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base         = declarative_base()
 
@@ -101,6 +118,10 @@ class AnnotationDB(Base):
     source_lang     = Column(String(10), default="en")
     target_lang     = Column(String(10), default="fr")
     source_name     = Column(String(255), nullable=True)   # uploaded file name, if any
+    review_status   = Column(String(20), default="pending")   # pending | approved | rejected
+    review_notes    = Column(Text, nullable=True)
+    reviewed_by     = Column(String(100), nullable=True)
+    reviewed_at     = Column(String(50), nullable=True)
     owner           = relationship("UserDB", back_populates="annotations")
 
 class JobDB(Base):
@@ -125,8 +146,12 @@ class JobDB(Base):
 # Add columns that older databases don't have yet (safe migration)
 from sqlalchemy import inspect, text
 _COLUMN_MIGRATIONS = [
-    ("user_id",     "INTEGER REFERENCES users(id)"),
-    ("source_name", "VARCHAR(255)"),
+    ("user_id",       "INTEGER REFERENCES users(id)"),
+    ("source_name",   "VARCHAR(255)"),
+    ("review_status", "VARCHAR(20) DEFAULT 'pending'"),
+    ("review_notes",  "TEXT"),
+    ("reviewed_by",   "VARCHAR(100)"),
+    ("reviewed_at",   "VARCHAR(50)"),
 ]
 def _add_missing_columns():
     try:
@@ -264,6 +289,7 @@ async def reject_oversized_uploads(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=False,   # auth uses a Bearer header, not cookies
     allow_methods=["*"],
     allow_headers=["*"],
@@ -341,6 +367,8 @@ class AnnotationUpdate(BaseModel):
     original_text:   Optional[str] = None
     translated_text: Optional[str] = None
     ner_tags:        Optional[str] = None
+    source_lang:     Optional[str] = None
+    target_lang:     Optional[str] = None
 
 class AnnotationResponse(BaseModel):
     id:              int
@@ -718,7 +746,7 @@ _ner_load_lock = threading.Lock()       # one model load at a time, so two reque
 
 def _ner_max_models() -> int:
     try:
-        return max(0, int(os.getenv("NER_MAX_MODELS", "2")))
+        return max(0, int(os.getenv("NER_MAX_MODELS", "4")))
     except ValueError:
         return 2
 
@@ -880,7 +908,8 @@ def run_ner(text: str, lang: str, progress=None, cancelled=None, batch_size: Opt
         cached = [result_cache.get_json(k) for k in keys]
         todo = [n for n, hit in enumerate(cached) if hit is None]
         if todo:
-            with _ner_lock:
+            import torch
+            with _ner_lock, torch.inference_mode():
                 outputs = nlp([batch[n][1] for n in todo], batch_size=batch_size, **extra)
             for n, entities in zip(todo, outputs):
                 cached[n] = _clean_entities(batch[n][1], entities, 0, snap=lang not in NO_SPACE_LANGS)   # offsets relative to the chunk: reusable
@@ -922,6 +951,8 @@ def detect_language(text: str) -> Optional[str]:
         lang = None
     if script == "deva" and lang not in DEVANAGARI_LANGS:
         return "hi"                                 # Devanagari text that langdetect could not place (or placed outside Devanagari languages)
+    if lang and lang not in local_translator.SUPPORTED_LANGS:
+        return "en"
     return lang
 
 # -------------------------------------------------------
@@ -998,6 +1029,8 @@ def _parse_ner_tags(raw: Optional[str]) -> list:
         tags = json.loads(raw)
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="ner_tags must be valid JSON.")
+    if isinstance(tags, dict):
+        tags = [tags]
     if not isinstance(tags, list):
         raise HTTPException(status_code=400, detail="ner_tags must be a JSON list.")
     return tags
@@ -1093,10 +1126,32 @@ def detect_lang(req: TextRequest, current_user: UserDB = Depends(get_current_use
 
 @app.post("/api/ner")
 def perform_ner(req: TextRequest, current_user: UserDB = Depends(get_current_user)):
+    t_start = time.perf_counter()
     try:
         _check_length(req.text)
-        lang    = normalize_lang(req.lang) if req.lang and req.lang != "auto" else (detect_language(req.text) or "en")
-        return {"entities": run_ner(req.text, lang)}
+        t_detect = 0.0
+        if req.lang and req.lang != "auto":
+            lang = normalize_lang(req.lang)
+        else:
+            t_d0 = time.perf_counter()
+            lang = detect_language(req.text) or "en"
+            t_detect = time.perf_counter() - t_d0
+
+        t_m0 = time.perf_counter()
+        nlp = get_ner_pipeline(lang)
+        t_model = time.perf_counter() - t_m0
+
+        t_i0 = time.perf_counter()
+        entities = run_ner(req.text, lang)
+        t_infer = time.perf_counter() - t_i0
+
+        t_total = time.perf_counter() - t_start
+        logger.info(
+            f"[TIMING] NER completed in {t_total:.3f}s "
+            f"(lang_detect: {t_detect:.3f}s, model_get: {t_model:.3f}s, inference: {t_infer:.3f}s) "
+            f"lang='{lang}' chars={len(req.text)} entities={len(entities)}"
+        )
+        return {"entities": entities}
     except HTTPException:
         raise
     except Exception as e:
@@ -1107,12 +1162,32 @@ def perform_ner(req: TextRequest, current_user: UserDB = Depends(get_current_use
 
 @app.post("/api/translate")
 def translate(req: TranslationRequest, current_user: UserDB = Depends(get_current_user)):
+    t_start = time.perf_counter()
     try:
         _check_length(req.text)
-        src = req.source_lang if req.source_lang != "auto" else (detect_language(req.text) or "en")
+        t_detect = 0.0
+        if req.source_lang and req.source_lang != "auto":
+            src = req.source_lang
+        else:
+            t_d0 = time.perf_counter()
+            src = detect_language(req.text) or "en"
+            t_detect = time.perf_counter() - t_d0
+
+        src_norm = normalize_lang(src)
+        tgt_norm = normalize_lang(req.target_lang)
         used: list = []
-        translated = perform_translation(normalize_lang(src), normalize_lang(req.target_lang), req.text, used)
-        return {"translated_text": translated, "provider": PROVIDER_LABELS.get(used[0], used[0]) if used else ""}
+        t_i0 = time.perf_counter()
+        translated = perform_translation(src_norm, tgt_norm, req.text, used)
+        t_infer = time.perf_counter() - t_i0
+        t_total = time.perf_counter() - t_start
+
+        provider_name = PROVIDER_LABELS.get(used[0], used[0]) if used else "unknown"
+        logger.info(
+            f"[TIMING] Translation completed in {t_total:.3f}s "
+            f"(lang_detect: {t_detect:.3f}s, inference: {t_infer:.3f}s) "
+            f"{src_norm}->{tgt_norm} chars={len(req.text)} via {provider_name}"
+        )
+        return {"translated_text": translated, "provider": provider_name}
     except HTTPException:
         raise
     except Exception as e:
@@ -1180,6 +1255,8 @@ def update_annotation(
     new_tags = _parse_ner_tags(update.ner_tags) if update.ner_tags is not None else None
     if update.original_text   is not None: row.original_text   = update.original_text
     if update.translated_text is not None: row.translated_text = update.translated_text
+    if update.source_lang     is not None: row.source_lang     = update.source_lang
+    if update.target_lang     is not None: row.target_lang     = update.target_lang
     if new_tags is not None:
         try:
             ner_collection.update_one(
@@ -1268,6 +1345,135 @@ def export_annotations(
 
 
 # =======================================================
+# REVIEW / HUMAN VERIFICATION endpoints
+# =======================================================
+
+class ReviewUpdate(BaseModel):
+    review_status: str          # "approved" | "rejected" | "pending"
+    review_notes:  Optional[str] = None
+
+class AnnotationPatch(BaseModel):
+    original_text:   Optional[str] = None
+    translated_text: Optional[str] = None
+    ner_tags:        Optional[str] = None
+
+def _build_review_response(row: AnnotationDB, mongo_doc) -> dict:
+    tags = mongo_doc["ner_tags"] if mongo_doc and mongo_doc.get("ner_tags") else []
+    return {
+        "id":             row.id,
+        "original_text":  (row.original_text or "")[:LIST_TEXT_CHARS],
+        "translated_text": row.translated_text,
+        "source_lang":    row.source_lang or "en",
+        "target_lang":    row.target_lang or "fr",
+        "source_name":    row.source_name,
+        "ner_tags":       json.dumps(tags[:LIST_MAX_ENTITIES]) if tags else None,
+        "review_status":  getattr(row, "review_status", None) or "pending",
+        "review_notes":   getattr(row, "review_notes", None),
+        "reviewed_by":    getattr(row, "reviewed_by", None),
+        "reviewed_at":    getattr(row, "reviewed_at", None),
+    }
+
+@app.get("/api/review")
+def get_review_queue(
+    page: int = 1,
+    limit: int = 20,
+    status: str = "all",
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    """List annotations for human review. status=all|pending|approved|rejected"""
+    limit = max(1, min(limit, 100))
+    page  = max(1, page)
+    query = db.query(AnnotationDB).filter(AnnotationDB.user_id == current_user.id)
+    if status in ("pending", "approved", "rejected"):
+        query = query.filter(AnnotationDB.review_status == status)
+    total = query.count()
+    rows  = query.order_by(AnnotationDB.id.desc()).offset((page - 1) * limit).limit(limit).all()
+    docs  = _mongo_docs([r.id for r in rows])
+    return {
+        "total": total,
+        "page":  page,
+        "limit": limit,
+        "pages": max(1, (total + limit - 1) // limit),
+        "items": [_build_review_response(r, docs.get(r.id)) for r in rows],
+    }
+
+@app.patch("/api/annotations/{annotation_id}/review")
+def review_annotation(
+    annotation_id: int,
+    update: ReviewUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    """Approve, reject or reset an annotation's review status."""
+    if update.review_status not in ("pending", "approved", "rejected"):
+        raise HTTPException(status_code=400, detail="review_status must be pending, approved, or rejected")
+    row = db.query(AnnotationDB).filter(
+        AnnotationDB.id == annotation_id,
+        AnnotationDB.user_id == current_user.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+    row.review_status = update.review_status
+    row.review_notes  = update.review_notes
+    row.reviewed_by   = current_user.username
+    row.reviewed_at   = datetime.now(timezone.utc).isoformat()
+    db.commit()
+    db.refresh(row)
+    mongo_doc = ner_collection.find_one({"annotation_id": annotation_id})
+    return _build_review_response(row, mongo_doc)
+
+@app.patch("/api/annotations/{annotation_id}")
+def patch_annotation(
+    annotation_id: int,
+    update: AnnotationPatch,
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    """Edit original text, translation, or NER tags of a saved annotation."""
+    row = db.query(AnnotationDB).filter(
+        AnnotationDB.id == annotation_id,
+        AnnotationDB.user_id == current_user.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+    new_tags = _parse_ner_tags(update.ner_tags) if update.ner_tags is not None else None
+    if update.original_text   is not None: row.original_text   = update.original_text
+    if update.translated_text is not None: row.translated_text = update.translated_text
+    if update.source_lang     is not None: row.source_lang     = update.source_lang
+    if update.target_lang     is not None: row.target_lang     = update.target_lang
+    if new_tags is not None:
+        try:
+            ner_collection.update_one(
+                {"annotation_id": annotation_id},
+                {"$set": {"ner_tags": new_tags}},
+                upsert=True,
+            )
+        except PyMongoError as e:
+            db.rollback()
+            logger.error(f"MongoDB update failed: {e}")
+            raise HTTPException(status_code=503, detail="NER store unavailable; nothing was updated.")
+    # reset review status when content changes
+    row.review_status = "pending"
+    row.reviewed_by   = None
+    row.reviewed_at   = None
+    db.commit()
+    db.refresh(row)
+    mongo_doc = ner_collection.find_one({"annotation_id": annotation_id})
+    return _build_review_response(row, mongo_doc)
+
+# =======================================================
+# HEALTH endpoint (for load balancers / monitoring)
+# =======================================================
+
+@app.get("/api/health")
+def api_health():
+    """Quick health check — no auth required. Useful for load balancers."""
+    with JOBS_LOCK:
+        running = sum(1 for j in JOBS.values() if j.get("status") in ("queued", "running"))
+    return {"status": "ok", "jobs_running": running}
+
+# =======================================================
 # DOCUMENTS: upload -> extract text -> background analyze/translate job
 # =======================================================
 MAX_DOC_CHARS             = 1_000_000   # ~400 pages of text
@@ -1290,7 +1496,8 @@ _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 class DocumentAnalyzeRequest(BaseModel):
     source_lang: str = "auto"
-    target_lang: str = "fr"
+    target_lang: Optional[str] = "fr"
+    mode: Optional[str] = "both"  # "ner", "translate", "both"
 
 def _purge_old():
     cutoff = time.time() - DOC_TTL_SECONDS
@@ -1458,6 +1665,70 @@ def upload_document(file: UploadFile = File(...), current_user: UserDB = Depends
         "detected_language": detect_language(text[:5000]),
     }
 
+@app.post("/api/documents/bulk")
+async def upload_documents_bulk(
+    files: List[UploadFile] = File(...),
+    current_user: UserDB = Depends(get_current_user),
+):
+    """Upload up to 20 files at once. Returns {uploaded: [...], errors: [...]}."""
+    MAX_BULK = 20
+    if len(files) > MAX_BULK:
+        raise HTTPException(status_code=400, detail=f"Too many files (max {MAX_BULK} per request).")
+    _purge_old()
+
+    def _process_one(file: UploadFile):
+        name = Path(file.filename or "document").name[:200]
+        try:
+            ext = doc_extract.check_supported(name)
+        except doc_extract.ExtractionError as e:
+            return None, {"filename": name, "error": str(e)}
+        doc_id   = uuid.uuid4().hex
+        tmp_path = DOC_DIR / f"upload_{doc_id}{ext}"
+        size = 0
+        try:
+            with open(tmp_path, "wb") as out:
+                while True:
+                    buf = file.file.read(1024 * 1024)
+                    if not buf:
+                        break
+                    size += len(buf)
+                    if size > MAX_UPLOAD_BYTES:
+                        return None, {"filename": name, "error": f"File too large (max {MAX_UPLOAD_MB} MB)."}
+                    out.write(buf)
+            if size == 0:
+                return None, {"filename": name, "error": "The file is empty."}
+            try:
+                text, info = doc_extract.extract_text(tmp_path, name)
+            except doc_extract.ExtractionError as e:
+                return None, {"filename": name, "error": str(e)}
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if len(text) > MAX_DOC_CHARS:
+            return None, {"filename": name, "error": f"Document too large ({len(text):,} chars; max {MAX_DOC_CHARS:,})."}
+        (DOC_DIR / f"{doc_id}.txt").write_text(text, encoding="utf-8")
+        meta = {"user_id": current_user.id, "filename": name, "size": size, "chars": len(text), "info": info}
+        (DOC_DIR / f"{doc_id}.json").write_text(json.dumps(meta), encoding="utf-8")
+        logger.info(f"Bulk upload: {name} ({size} bytes) -> {len(text)} chars for user {current_user.id}")
+        return {
+            "doc_id":            doc_id,
+            "filename":          name,
+            "size":              size,
+            "chars":             len(text),
+            "words":             len(text.split()),
+            "info":              info,
+            "preview":           text[:DOC_PREVIEW_CHARS],
+            "detected_language": detect_language(text[:5000]),
+        }, None
+
+    loop = asyncio.get_event_loop()
+    results = await asyncio.gather(*[loop.run_in_executor(None, _process_one, f) for f in files])
+    uploaded = [r for r, e in results if r is not None]
+    errors   = [e for r, e in results if e is not None]
+    return {"uploaded": uploaded, "errors": errors}
+
 @app.delete("/api/documents/{doc_id}")
 def delete_document(doc_id: str, current_user: UserDB = Depends(get_current_user)):
     _load_doc(doc_id, current_user.id)                    # ownership check
@@ -1506,9 +1777,13 @@ def _run_document_job(job_id: str):
             job.update(kw)
         _save_job(job, force="status" in kw)        # a new status is written at once; stage/progress at most every JOB_SAVE_INTERVAL
 
+    mode = job.get("mode", "both")
+    run_ner_flag = mode in ("ner", "both")
+    run_tr_flag  = mode in ("translate", "both")
+
     counters = {"ner": (0, 1), "tr": (0, 1)}
-    translate_on = {"v": True}
-    weight_tr = {"v": 0.5}          # share of the progress bar that translation represents
+    translate_on = {"v": run_tr_flag}
+    weight_tr = {"v": 0.5 if (run_ner_flag and run_tr_flag) else (1.0 if run_tr_flag else 0.0)}
 
     def refresh():
         with JOBS_LOCK:
@@ -1516,12 +1791,19 @@ def _run_document_job(job_id: str):
             td, tt = counters["tr"]
             f_ner = nd / nt if nt else 1
             f_tr  = (td / tt if tt else 1) if translate_on["v"] else 1
-            w = weight_tr["v"]
-            job["progress"] = round(0.03 + 0.92 * ((1 - w) * f_ner + w * f_tr), 4)
-            stage = [f"Finding entities {int(f_ner * 100)}%"]
-            if translate_on["v"]:
-                stage.append(f"Translating {int(f_tr * 100)}%")
-            job["stage"] = " · ".join(stage)
+            if run_ner_flag and translate_on["v"]:
+                w = weight_tr["v"]
+                job["progress"] = round(0.03 + 0.92 * ((1 - w) * f_ner + w * f_tr), 4)
+                job["stage"] = f"Finding entities {int(f_ner * 100)}% · Translating {int(f_tr * 100)}%"
+            elif run_ner_flag:
+                job["progress"] = round(0.03 + 0.92 * f_ner, 4)
+                job["stage"] = f"Finding entities {int(f_ner * 100)}%"
+            elif translate_on["v"]:
+                job["progress"] = round(0.03 + 0.92 * f_tr, 4)
+                job["stage"] = f"Translating {int(f_tr * 100)}%"
+            else:
+                job["progress"] = 0.95
+                job["stage"] = "Finalizing"
         _save_job(job)                              # throttled
 
     pool = None
@@ -1534,9 +1816,9 @@ def _run_document_job(job_id: str):
         if src in ("", "auto"):
             src = detect_language(text[:5000]) or "en"
         tgt = normalize_lang(job["target_lang"])
-        translate_on["v"] = src != tgt
+        translate_on["v"] = run_tr_flag and (src != tgt)
         warnings = []
-        if not translate_on["v"]:
+        if run_tr_flag and src == tgt:
             warnings.append("Source and target language are the same, so translation was skipped.")
 
         # translation (network-bound) runs in a thread pool while NER (CPU-bound) runs here
@@ -1558,15 +1840,17 @@ def _run_document_job(job_id: str):
                 f.add_done_callback(on_done)
                 futures.append(f)
 
-        def ner_progress(done, total):
-            with JOBS_LOCK:
-                counters["ner"] = (done, total)
-            refresh()
+        entities = []
+        if run_ner_flag:
+            def ner_progress(done, total):
+                with JOBS_LOCK:
+                    counters["ner"] = (done, total)
+                refresh()
 
-        update(stage="Loading entity model")
-        entities = run_ner(text, src, progress=ner_progress, cancelled=cancelled)
-        with JOBS_LOCK:
-            counters["ner"] = (1, 1)
+            update(stage="Loading entity model")
+            entities = run_ner(text, src, progress=ner_progress, cancelled=cancelled)
+            with JOBS_LOCK:
+                counters["ner"] = (1, 1)
 
         translated = None
         failed = attempted = 0
@@ -1602,16 +1886,21 @@ def _run_document_job(job_id: str):
             warnings.append(f"Only the first {MAX_STORED_ENTITIES:,} of {len(entities):,} entities were stored.")
         db = SessionLocal()
         try:
-            row, _ = _store_annotation(db, job["user_id"], text, translated, stored, src, tgt, meta["filename"], mongo_text=False)
+            row, _ = _store_annotation(
+                db, job["user_id"], text, translated, stored,
+                src, tgt if run_tr_flag else (job.get("target_lang") or "fr"),
+                meta["filename"], mongo_text=False
+            )
             annotation_id = row.id
         finally:
             db.close()
 
-        summary = _summarize_entities(entities)
+        summary = _summarize_entities(entities) if entities else []
         update(status="done", stage="Done", progress=1.0, warnings=warnings, result={
             "annotation_id":    annotation_id,
+            "mode":             mode,
             "source_lang":      src,
-            "target_lang":      tgt,
+            "target_lang":      tgt if run_tr_flag else None,
             "original_chars":   len(text),
             "translated_chars": len(translated) if translated else 0,
             "translation_engines": [PROVIDER_LABELS.get(e, e) for e in engines],
@@ -1656,15 +1945,19 @@ def _own_job(job_id: str, user_id: int) -> dict:
 @app.post("/api/documents/{doc_id}/analyze", status_code=202)
 def analyze_document(doc_id: str, req: DocumentAnalyzeRequest, current_user: UserDB = Depends(get_current_user)):
     meta, _ = _load_doc(doc_id, current_user.id)
-    if not req.target_lang.strip():
-        raise HTTPException(status_code=400, detail="Choose a target language.")
+    mode = (req.mode or "both").lower().strip()
+    if mode not in ("ner", "translate", "both"):
+        raise HTTPException(status_code=400, detail="Invalid mode. Supported modes: 'ner', 'translate', 'both'.")
+    target_lang = (req.target_lang or "").strip()
+    if mode in ("translate", "both") and not target_lang:
+        raise HTTPException(status_code=400, detail="Choose a target language for translation.")
     with JOBS_LOCK:
         if any(j["user_id"] == current_user.id and j["status"] in ("queued", "running") for j in JOBS.values()):
             raise HTTPException(status_code=409, detail="A document is already being processed. Wait for it or cancel it first.")
         job_id = uuid.uuid4().hex
         JOBS[job_id] = {
             "id": job_id, "doc_id": doc_id, "user_id": current_user.id, "filename": meta["filename"],
-            "source_lang": req.source_lang, "target_lang": req.target_lang,
+            "source_lang": req.source_lang, "target_lang": target_lang or "fr", "mode": mode,
             "status": "queued", "stage": "Queued", "progress": 0.0, "cancel": False,
             "error": None, "warnings": [], "result": None, "created": time.time(), "attempts": 1,
         }
